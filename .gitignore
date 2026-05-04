@@ -1,7 +1,15 @@
-# Build directories
-.cache/
+# Build artifacts
+*.o
+*.ko
+*.mod.c
+*.mod
+*.order
+*.symvers
 .*.cmd
 .tmp_versions/
+
+# Build directories
+.cache/
 
 # Editor / OS
 .DS_Store
