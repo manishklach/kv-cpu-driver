@@ -3,7 +3,10 @@
 Linux kernel driver for the **KV-Cache Companion Processing Unit (KV-CPU)** — a purpose-built PCIe/CXL 3.0 device that implements a closed-loop hardware KV-cache lifecycle system for large language model inference servers.
 
 **Patent Pending** — Provisional patent filed in India (Form 2A, Patents Act 1970).  
-Inventor: Manish Keshav Lachwani
+Docket No 65779  
+App Number 202641056309  
+Reference Number TEMP/E1/61503/2026-CHE  
+CBR Number 37184  
 
 ---
 
@@ -240,4 +243,4 @@ Issues and PRs welcome. Areas most in need of work:
 
 ---
 
-*KV-CPU — Patent Pending (India). Inventor: Manish Keshav Lachwani.*
+*KV-CPU — Patent Pending (India). Docket No 65779, App Number 202641056309.*
