@@ -1,0 +1,2 @@
+0x7f3ab940	kvcpu_hepc_step_advance	/mnt/c/Users/ManishKL/.gemini/antigravity/playground/obsidian-cosmos/kv-cpu-driver/kv_cpu	EXPORT_SYMBOL_GPL	
+0x3666e893	kvcpu_madvise_handler	/mnt/c/Users/ManishKL/.gemini/antigravity/playground/obsidian-cosmos/kv-cpu-driver/kv_cpu	EXPORT_SYMBOL_GPL	
