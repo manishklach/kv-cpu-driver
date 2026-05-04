@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config KV_CPU
+	tristate "KV-CPU Reference Control Plane Driver"
+	depends on PCI
+	help
+	  Say Y here if you want to support the KV-CPU AI memory accelerator.
+	  This driver provides a control plane for LLM inference semantics
+	  such as decode steps and KV-block lifecycle hints.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called kv_cpu.
