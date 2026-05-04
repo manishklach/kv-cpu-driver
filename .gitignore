@@ -1,22 +1,14 @@
-# Build artifacts
+# Kernel build artifacts
 *.o
 *.ko
 *.mod.c
 *.mod
-*.order
 *.symvers
+*.order
+.tmp_versions
 .*.cmd
-.tmp_versions/
+.cache.mk
+*.o.d
 
-# Build directories
-.cache/
-
-# Editor / OS
-.DS_Store
-*.swp
-*~
-.vscode/
-.idea/
-
-# Test binaries
-tools/test/kvcpu_test
+# Userspace tools
+tools/kvctl

@@ -1,73 +1,66 @@
-/**
- * kvctl.c — Control utility for KV-CPU Reference Driver
- * 
- * Demonstrates how a userspace LLM runtime interacts with the kernel control plane.
- *
- * Usage:
- *   kvctl step <n>
- *   kvctl hot <addr> <len>
- *   kvctl evict <addr> <len>
- *   kvctl prefetch <addr> <len> <step>
- */
-
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
-#include <stdint.h>
 #include <string.h>
 #include "../include/uapi/linux/kv_cpu.h"
 
 #define DEV_PATH "/dev/kvcpu0"
 
-void print_usage(char *prog) {
-	printf("Usage: %s <cmd> <args...>\n", prog);
-	printf("  step <n>                       - Signal current decode step\n");
-	printf("  hot <addr> <len>               - Mark range as hot (priority boost)\n");
-	printf("  evict <addr> <len>             - Force eviction to slow tier\n");
-	printf("  prefetch <addr> <len> <step>   - Hint prefetch for future step\n");
+void print_usage(const char *prog) {
+	printf("Usage: %s <cmd> <args>\n", prog);
+	printf("  step <n>           Advance to decode step n\n");
+	printf("  hot <va> <len>     Mark range as hot\n");
+	printf("  evict <va> <len>   Mark range for eviction\n");
+	printf("  prefetch <va> <len> <step>  Hint prefetch for future step\n");
+	printf("  share <va> <len>   Mark range as shared prefix\n");
 }
 
 int main(int argc, char *argv[]) {
-	if (argc < 2) {
+	int fd;
+	if (argc < 3) {
 		print_usage(argv[0]);
 		return 1;
 	}
 
-	int fd = open(DEV_PATH, O_RDWR);
+	fd = open(DEV_PATH, O_RDWR);
 	if (fd < 0) {
 		perror("open " DEV_PATH);
 		return 1;
 	}
 
-	char *cmd = argv[1];
-
-	if (strcmp(cmd, "step") == 0 && argc == 3) {
-		struct kv_step_info si = { .step = strtoull(argv[2], NULL, 0) };
-		if (ioctl(fd, KV_CPU_STEP_ADVANCE, &si) < 0) perror("ioctl STEP_ADVANCE");
-		else printf("Signaled decode step %llu\n", si.step);
-	} 
-	else if (strcmp(cmd, "hot") == 0 && argc == 4) {
-		struct kv_block_range br = {
-			.start = strtoull(argv[2], NULL, 0),
+	if (strcmp(argv[1], "step") == 0) {
+		struct kv_cpu_step_info step = { .step = strtoull(argv[2], NULL, 0) };
+		if (ioctl(fd, KV_CPU_STEP_ADVANCE, &step) < 0) perror("ioctl STEP");
+	} else if (strcmp(argv[1], "hot") == 0) {
+		struct kv_cpu_block_info block = {
+			.va = strtoull(argv[2], NULL, 0),
 			.len = strtoull(argv[3], NULL, 0)
 		};
-		if (ioctl(fd, KV_CPU_MARK_HOT, &br) < 0) perror("ioctl MARK_HOT");
-		else printf("Marked 0x%llx + %llu as HOT\n", br.start, br.len);
-	}
-	else if (strcmp(cmd, "evict") == 0 && argc == 4) {
-		struct kv_block_range br = {
-			.start = strtoull(argv[2], NULL, 0),
+		if (ioctl(fd, KV_CPU_MARK_HOT, &block) < 0) perror("ioctl HOT");
+	} else if (strcmp(argv[1], "evict") == 0) {
+		struct kv_cpu_block_info block = {
+			.va = strtoull(argv[2], NULL, 0),
 			.len = strtoull(argv[3], NULL, 0)
 		};
-		if (ioctl(fd, KV_CPU_EVICT, &br) < 0) perror("ioctl EVICT");
-		else printf("Requested eviction for 0x%llx + %llu\n", br.start, br.len);
-	}
-	else {
+		if (ioctl(fd, KV_CPU_EVICT, &block) < 0) perror("ioctl EVICT");
+	} else if (strcmp(argv[1], "prefetch") == 0 && argc == 5) {
+		struct kv_cpu_block_info block = {
+			.va = strtoull(argv[2], NULL, 0),
+			.len = strtoull(argv[3], NULL, 0),
+			.target_step = strtoull(argv[4], NULL, 0)
+		};
+		if (ioctl(fd, KV_CPU_PREFETCH, &block) < 0) perror("ioctl PREFETCH");
+	} else if (strcmp(argv[1], "share") == 0) {
+		struct kv_cpu_block_info block = {
+			.va = strtoull(argv[2], NULL, 0),
+			.len = strtoull(argv[3], NULL, 0)
+		};
+		if (ioctl(fd, KV_CPU_SHARE_PREFIX, &block) < 0) perror("ioctl SHARE");
+	} else {
 		print_usage(argv[0]);
-		close(fd);
-		return 1;
 	}
 
 	close(fd);

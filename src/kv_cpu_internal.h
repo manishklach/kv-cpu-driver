@@ -21,20 +21,19 @@ struct kvcpu_dev {
 	struct device     *dev;
 	int                minor;
 	bool               is_mock;
-	void              *mock_bar;
+	void              *mock_bar; /* Fake MMIO memory */
 };
 
 /* Internal function prototypes */
+int  kvcpu_open(struct inode *inode, struct file *file);
 long kvcpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
-void kvcpu_mmio_write64(struct kvcpu_dev *kv, u32 offset, u64 val);
-u64  kvcpu_mmio_read64(struct kvcpu_dev *kv, u32 offset);
 
-/* Policy / Hardware hooks */
-void kvcpu_policy_step_advance(struct kvcpu_dev *kv, u64 step);
-void kvcpu_policy_mark_hot(struct kvcpu_dev *kv, phys_addr_t pa, size_t len);
-
-/* DMA stubs */
-int kvcpu_dma_evict(struct kvcpu_dev *kv, phys_addr_t pa, size_t len);
-int kvcpu_dma_prefetch(struct kvcpu_dev *kv, phys_addr_t pa, size_t len);
+/* MMIO Helpers */
+void kv_cpu_write_reg(struct kvcpu_dev *kv, u32 offset, u64 val);
+void kv_cpu_cmd_step(struct kvcpu_dev *kv, u64 step);
+void kv_cpu_cmd_hot(struct kvcpu_dev *kv, u64 va, u64 len);
+void kv_cpu_cmd_evict(struct kvcpu_dev *kv, u64 va, u64 len);
+void kv_cpu_cmd_prefetch(struct kvcpu_dev *kv, u64 va, u64 len, u64 step);
+void kv_cpu_cmd_share(struct kvcpu_dev *kv, u64 va, u64 len);
 
 #endif /* _KV_CPU_INTERNAL_H */
