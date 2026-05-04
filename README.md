@@ -27,29 +27,39 @@ The KV-CPU introduces a control plane that allows LLM runtimes to communicate in
 
 ## Architecture Overview
 
-The KV-CPU integrates as a CXL-attached accelerator, exposing local memory as a NUMA node while accepting control signals through MMIO.
+The KV-CPU is integrated as a CXL Type 1+3 device, exposing on-board LPDDR5X as a NUMA node while accepting control commands via MMIO.
 
+### 1. System-Level Architecture: Memory Tiering
 ```text
-   +---------------------------------------+
-   |        User Space (LLM Runtime)       |
-   |   (vLLM / SGLang / TensorRT-LLM)      |
-   +---------------------------------------+
-           |               |             |
-     [madvise()]       [ioctl()]    [io_uring]
-           |               |             |
-           v               v             v
-   +---------------------------------------+
-   |        KV-CPU Linux Driver            |
-   |  (Control Plane / Semantic Mapping)   |
-   +---------------------------------------+
-           |               |
-     [MMIO Writes]   [DMA Descriptors]
-           |               |
-           v               v
-   +---------------------------------------+
-   |          KV-CPU Hardware              |
-   |  [HEPC]      [RTBD]      [NMCE]       |
-   +---------------------------------------+
+    +----------------+       +----------------+       +----------------+
+    |      GPU       | <---> |     KV-CPU     | <---> |   Host DRAM    |
+    |  (Tier 0: HBM) |  CXL  | (Tier 1: LP5X) |  PCIe | (Tier 2: DDR5) |
+    +----------------+       +----------------+       +----------------+
+                                     |
+                                     v
+                             +----------------+
+                             |   NVMe SSD     |
+                             | (Tier 3: Swap) |
+                             +----------------+
+```
+
+### 2. Control Plane Flow: Semantic Signal Path
+```text
+    USER SPACE       (LLM Runtime)  |  vLLM / SGLang / TensorRT-LLM
+         |                          |
+    [ madvise() / ioctl() ]         |  Semantic signals (step, hot, evict)
+         |                          |
+    ================================|=====================================
+    KERNEL SPACE     (kv_cpu)       |  Linux Kernel Context
+         |                          |
+    [ Translate VA -> PA ]          |  UAPI translation & validation
+         |                          |
+    [   MMIO Write   ]              |  Register access (Doorbell)
+         |                          |
+    ================================|=====================================
+    HARDWARE         (KV-CPU)       |  Silicon Logic (HEPC / RTBD)
+         |                          |
+    [ Trigger Scan ]                |  Hardware scan of block priorities
 ```
 
 ## Kernel Integration

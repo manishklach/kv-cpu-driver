@@ -24,6 +24,31 @@ KV-CPU Hardware
 Memory Tiers (HBM / T1 / T2 / T3)
 ```
 
+### Closed-Loop Hardware Orchestration
+```text
+    +-------------------+           +-------------------+
+    |   NMCE (Compute)  | <-------+ |   RTBD (Metadata) |
+    |  Score Dot-Prod   |           |  Ref-Count / Tags |
+    +---------+---------+           +---------+---------+
+              |                               ^
+              v                               |
+    +---------+---------+           +---------+---------+
+    |   HEPC (Policy)   | -------> |   DMA (Placement) |
+    |  P(Bi) Scoring    |           |  Migrate / Fetch  |
+    +-------------------+           +-------------------+
+```
+
+### KV Block Semantic Lifecycle
+```text
+    [ ALLOCATED ] ----> [   HOT     ] ----> [ PRE-EVICT ] ----> [ COLD/OFFLOAD ]
+          |               ^    |               |                     |
+          | (Prefetch)    |    | (Step Gap)    | (Low Prio)          | (Release)
+          +---------------+    +---------------+---------------------+
+                                       |
+                                       v
+                                [   RECLAIMED  ]
+```
+
 ## Key Mechanisms
 
 ### 1. Decode-Step Signal Path
