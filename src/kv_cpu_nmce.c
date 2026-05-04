@@ -20,6 +20,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/pci.h>
+#include <linux/delay.h>
 #include "../include/kv_cpu.h"
 
 int kvcpu_nmce_init(struct kvcpu_dev *kv)

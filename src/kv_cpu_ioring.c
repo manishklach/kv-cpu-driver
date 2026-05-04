@@ -29,7 +29,6 @@
 
 #include <linux/module.h>
 #include <linux/io_uring.h>
-#include <linux/io_uring/cmd.h>
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include "../include/kv_cpu.h"
@@ -60,6 +59,7 @@ static DEFINE_MUTEX(g_ioring_lock);
  *      handler will call io_uring_cmd_done() when DMA completes.
  *   b) Return 0 for synchronous completion (KVCPU_MIG_F_SYNC flag).
  */
+#ifdef CONFIG_KVCPU_IORING_UPSTREAM
 static int kvcpu_ioring_issue(struct io_uring_cmd *cmd, unsigned int issue_flags)
 {
 	const struct kvcpu_ioring_cmd *mc =
@@ -129,7 +129,9 @@ static int kvcpu_ioring_issue(struct io_uring_cmd *cmd, unsigned int issue_flags
 	io_uring_cmd_done(cmd, 0, 0, issue_flags);
 	return 0;
 }
+#endif
 
+#ifdef CONFIG_KVCPU_IORING_UPSTREAM
 static int kvcpu_ioring_prep(struct io_uring_cmd *cmd,
 			     const struct io_uring_sqe *sqe)
 {
@@ -140,6 +142,7 @@ static int kvcpu_ioring_prep(struct io_uring_cmd *cmd,
 		return -EBADF;
 	return 0;
 }
+#endif
 
 /*
  * io_uring_cmd_def entries for our two custom opcodes.
@@ -148,6 +151,7 @@ static int kvcpu_ioring_prep(struct io_uring_cmd *cmd,
  * in the io_uring extensible commands RFC (Jens Axboe, 2023).
  * Until merged upstream, the driver falls back to the ioctl path.
  */
+#ifdef CONFIG_KVCPU_IORING_UPSTREAM
 static const struct io_uring_cmd_data kvcpu_ioring_ops[] = {
 	{
 		.cmd_sz  = sizeof(struct kvcpu_ioring_cmd),
@@ -160,6 +164,7 @@ static const struct io_uring_cmd_data kvcpu_ioring_ops[] = {
 		.prep    = kvcpu_ioring_prep,
 	},
 };
+#endif
 
 int kvcpu_ioring_register(struct kvcpu_dev *kv)
 {

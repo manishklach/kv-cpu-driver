@@ -23,7 +23,9 @@
 
 #include <linux/module.h>
 #include <linux/numa.h>
+#include <linux/memory.h>
 #include <linux/memory_hotplug.h>
+#include <linux/memory-tiers.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/node.h>
@@ -142,7 +144,7 @@ int kvcpu_mem_register(struct kvcpu_dev *kv)
 	kv->mem.numa_node = nid;
 
 	ret = add_memory_driver_managed(nid, base, size,
-					"kvcpu-t1", MHP_NID_IS_SETTED);
+					"kvcpu-t1", MHP_NONE);
 	if (ret) {
 		dev_err(kv->dev, "add_memory_driver_managed failed: %d\n", ret);
 		goto err_addmem;
@@ -197,7 +199,7 @@ void kvcpu_mem_unregister(struct kvcpu_dev *kv)
 	if (kv->mem.numa_node != NUMA_NO_NODE) {
 		clear_node_memory_type(kv->mem.numa_node, kv->mem.mtype);
 
-		remove_memory(kv->mem.numa_node, kv->mem.base, kv->mem.size);
+		remove_memory(kv->mem.base, kv->mem.size);
 
 		node_clear(kv->mem.numa_node, node_online_map);
 		node_clear(kv->mem.numa_node, node_possible_map);

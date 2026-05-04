@@ -1,0 +1,3 @@
+savedcmd_/mnt/c/Users/ManishKL/.gemini/antigravity/playground/obsidian-cosmos/kv-cpu-driver/kv_cpu.o := ld -m elf_x86_64 -z noexecstack --no-warn-rwx-segments   -r -o /mnt/c/Users/ManishKL/.gemini/antigravity/playground/obsidian-cosmos/kv-cpu-driver/kv_cpu.o @/mnt/c/Users/ManishKL/.gemini/antigravity/playground/obsidian-cosmos/kv-cpu-driver/kv_cpu.mod  ; ./tools/objtool/objtool --hacks=jump_label --hacks=noinstr --hacks=skylake --ibt --retpoline --rethunk --stackval --static-call --uaccess --prefix=16  --link  --module /mnt/c/Users/ManishKL/.gemini/antigravity/playground/obsidian-cosmos/kv-cpu-driver/kv_cpu.o
+
+/mnt/c/Users/ManishKL/.gemini/antigravity/playground/obsidian-cosmos/kv-cpu-driver/kv_cpu.o: $(wildcard ./tools/objtool/objtool)

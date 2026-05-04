@@ -27,9 +27,12 @@
  */
 
 #include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/container_of.h>
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
 #include <linux/slab.h>
+#include <linux/device.h>
 #include "../include/kv_cpu.h"
 
 /* ── telemetry show functions ─────────────────────────────────────────────── */
@@ -38,8 +41,7 @@
 static ssize_t name##_show(struct kobject *kobj,			\
 			    struct kobj_attribute *attr, char *buf)	\
 {									\
-	struct kvcpu_dev *kv =						\
-		container_of(kobj, struct kvcpu_dev, kobj[0]);		\
+	struct kvcpu_dev *kv = dev_get_drvdata(kobj_to_dev(kobj));	\
 	return sysfs_emit(buf, "%llu\n", kvcpu_readq(kv, reg));		\
 }									\
 static struct kobj_attribute attr_##name = __ATTR_RO(name)
@@ -55,8 +57,7 @@ KVCPU_SYSFS_RO_REG(rtbd_capacity,     KVCPU_REG_RTBD_CAP);
 static ssize_t nmce_bytes_saved_show(struct kobject *kobj,
 				     struct kobj_attribute *attr, char *buf)
 {
-	struct kvcpu_dev *kv =
-		container_of(kobj, struct kvcpu_dev, kobj[0]);
+	struct kvcpu_dev *kv = dev_get_drvdata(kobj_to_dev(kobj));
 	/*
 	 * Estimated bytes saved = ops * (avg_key_block_bytes - avg_score_bytes)
 	 * For D=128, B=32: 8192 - 320 = 7872 bytes saved per op.
@@ -70,8 +71,7 @@ static struct kobj_attribute attr_nmce_bytes_saved = __ATTR_RO(nmce_bytes_saved)
 static ssize_t hepc_status_show(struct kobject *kobj,
 				struct kobj_attribute *attr, char *buf)
 {
-	struct kvcpu_dev *kv =
-		container_of(kobj, struct kvcpu_dev, kobj[0]);
+	struct kvcpu_dev *kv = dev_get_drvdata(kobj_to_dev(kobj));
 	static const char * const phases[] = {
 		"idle", "scan", "evict", "prefetch"
 	};
@@ -83,8 +83,7 @@ static struct kobj_attribute attr_hepc_status = __ATTR_RO(hepc_status);
 static ssize_t numa_node_show(struct kobject *kobj,
 			      struct kobj_attribute *attr, char *buf)
 {
-	struct kvcpu_dev *kv =
-		container_of(kobj, struct kvcpu_dev, kobj[0]);
+	struct kvcpu_dev *kv = dev_get_drvdata(kobj_to_dev(kobj));
 	return sysfs_emit(buf, "%d\n", kv->mem.numa_node);
 }
 static struct kobj_attribute attr_numa_node = __ATTR_RO(numa_node);
@@ -95,16 +94,14 @@ static struct kobj_attribute attr_numa_node = __ATTR_RO(numa_node);
 static ssize_t name##_show(struct kobject *kobj,			\
 			    struct kobj_attribute *attr, char *buf)	\
 {									\
-	struct kvcpu_dev *kv =						\
-		container_of(kobj, struct kvcpu_dev, kobj[0]);		\
+	struct kvcpu_dev *kv = dev_get_drvdata(kobj_to_dev(kobj));	\
 	return sysfs_emit(buf, "%llu\n", kvcpu_readq(kv, reg));		\
 }									\
 static ssize_t name##_store(struct kobject *kobj,			\
 			     struct kobj_attribute *attr,		\
 			     const char *buf, size_t count)		\
 {									\
-	struct kvcpu_dev *kv =						\
-		container_of(kobj, struct kvcpu_dev, kobj[0]);		\
+	struct kvcpu_dev *kv = dev_get_drvdata(kobj_to_dev(kobj));	\
 	u64 val;							\
 	if (kstrtou64(buf, 0, &val))					\
 		return -EINVAL;						\
