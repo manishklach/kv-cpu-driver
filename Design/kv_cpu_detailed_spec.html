@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>KV-CPU v1.6 | Full Implementation Roadmap</title>
+    <style>
+        :root { --accent: #00d4ff; --bg: #0d0d0e; --panel: #1a1a1c; --logic: #50fa7b; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: #d1d1d6; padding: 40px; line-height: 1.6; }
+        .wrapper { max-width: 1200px; margin: auto; border: 1px solid #333; border-radius: 12px; background: var(--panel); overflow: hidden; }
+        .hero { background: linear-gradient(135deg, #003a5d, #00d4ff); padding: 40px; border-bottom: 2px solid var(--accent); }
+        .section { padding: 30px; border-bottom: 1px solid #333; }
+        .code-box { background: #000; color: var(--logic); padding: 20px; border-radius: 8px; font-family: 'Fira Code', monospace; font-size: 0.85rem; border: 1px solid #444; overflow-x: auto; }
+        h2 { color: var(--accent); border-bottom: 1px solid #333; padding-bottom: 10px; }
+        .roadmap { display: flex; justify-content: space-between; gap: 20px; margin: 20px 0; }
+        .phase { flex: 1; background: #252528; padding: 15px; border-radius: 8px; border-top: 4px solid var(--accent); }
+        .formula { background: #111; padding: 20px; text-align: center; font-size: 1.3rem; color: #ffaa00; border-radius: 8px; margin: 20px 0; }
+        footer { padding: 20px; text-align: center; font-size: 0.8rem; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div class="hero">
+            <h1>KV-CPU v1.6 Implementation Blueprint</h1>
+            <p><strong>Autonomous Context Management Logic & FPGA Roadmap</strong> | Ref: kv_cpu_patent_v3.pdf</p>
+        </div>
+
+        <div class="section">
+            <h2>1. Implementation Roadmap</h2>
+            <div class="roadmap">
+                <div class="phase">
+                    <h3>Phase 1: FPGA</h3>
+                    <p>Map RTL to Alveo U250. Verify 50ns decision latency and 25x traffic reduction[cite: 1].</p>
+                </div>
+                <div class="phase">
+                    <h3>Phase 2: Handshake</h3>
+                    <p>Integrate kv_cpu.ko driver with vLLM via MADV_KV_HOT semantic hints[cite: 1].</p>
+                </div>
+                <div class="phase">
+                    <h3>Phase 3: ASIC</h3>
+                    <p>TSMC N5/N7 Tape-out for production-grade context expansion (256k+ tokens)[cite: 1].</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>2. HEPC Priority Logic (SystemVerilog)</h2>
+            <div class="code-box">
+always_comb begin<br>
+&nbsp;&nbsp;// Priority = wR*R + wF*F + wS*S + wD*D<br>
+&nbsp;&nbsp;p_score = (w_r * R) + (w_f * F) + (w_s * S) + (w_d * D);<br>
+<br>
+&nbsp;&nbsp;// Autonomous Staging Decision<br>
+&nbsp;&nbsp;evict_req = (p_score < EVICT_T) && !is_guarded_prefix;<br>
+&nbsp;&nbsp;stage_req = (p_score > PREFETCH_T);<br>
+end
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>3. The Scoring Formula[cite: 1]</h2>
+            <div class="formula">
+                $$P(B_i) = w_r \cdot R + w_f \cdot F + w_s \cdot S + w_d \cdot D \pmod{2^{16}}$$
+            </div>
+            <ul>
+                <li><strong>w_s * S:</strong> The "Step Proximity" component that makes the hardware aware of the LLM decode step[cite: 1].</li>
+                <li><strong>w_d * D:</strong> The hardware-level prefix guard that prevents OOM during shared prompt multi-tenancy[cite: 1].</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>4. Hardware Performance Targets[cite: 1]</h2>
+            <table style="width:100%; border-collapse: collapse; background: #000;">
+                <tr style="background:#222; color:var(--accent);">
+                    <th style="padding:10px; border:1px solid #333;">Metric</th>
+                    <th style="padding:10px; border:1px solid #333;">Baseline (SW)</th>
+                    <th style="padding:10px; border:1px solid #333;">KV-CPU Target</th>
+                </tr>
+                <tr><td style="padding:10px; border:1px solid #333;">Decision Latency</td><td>200-600 µs</td><td>~50 ns</td></tr>
+                <tr><td style="padding:10px; border:1px solid #333;">PCIe Traffic (70B Model)</td><td>8,192 B/block</td><td>320 B/block</td></tr>
+                <tr><td style="padding:10px; border:1px solid #333;">Max Context (1x H100)</td><td>~20k tokens</td><td>~256k tokens</td></tr>
+            </table>
+        </div>
+
+        <footer>
+            CONFIDENTIAL - FILED UNDER THE PATENTS ACT, 1970 (INDIA) | REF: kv_cpu_patent_v3.pdf<br><br>
+            <strong>Patent Information:</strong><br>
+            Docket No 65779 | App Number 202641056309<br>
+            Reference Number TEMP/E1/61503/2026-CHE | CBR Number 37184 | Country: India
+        </footer>
+    </div>
+</body>
+</html>
