@@ -33,10 +33,17 @@ MODULE_AUTHOR("Manish Keshav Lachwani <mlachwani@gmail.com>");
 MODULE_DESCRIPTION("KV-Cache Companion Processing Unit (KV-CPU) driver");
 MODULE_VERSION(DRIVER_VERSION);
 
+static bool mock = false;
+module_param(mock, bool, 0444);
+MODULE_PARM_DESC(mock, "Enable hardware emulation mode (no physical device required)");
+
 /* ── Global device class ─────────────────────────────────────────────────── */
 static struct class   *kvcpu_class;
 static dev_t           kvcpu_devt;
 static DEFINE_IDA(kvcpu_ida);
+
+/* For mock mode tracking */
+static struct kvcpu_dev *mock_kv_dev;
 
 /* ── PCI ID table ────────────────────────────────────────────────────────── */
 static const struct pci_device_id kvcpu_pci_ids[] = {
@@ -421,6 +428,114 @@ static struct pci_driver kvcpu_pci_driver = {
 	.remove   = kvcpu_remove,
 };
 
+/* ── Mock Device Initialization ────────────────────────────────────────── */
+static int kvcpu_mock_probe(void)
+{
+	struct kvcpu_dev *kv;
+	int ret, minor;
+
+	pr_info("kv_cpu: initializing hardware emulation (mock mode)\n");
+
+	kv = kzalloc(sizeof(*kv), GFP_KERNEL);
+	if (!kv)
+		return -ENOMEM;
+
+	kv->is_mock = true;
+	kv->mock_bar_mem = (void *)get_zeroed_page(GFP_KERNEL);
+	if (!kv->mock_bar_mem) {
+		ret = -ENOMEM;
+		goto err_bar;
+	}
+
+	/* Initialize mock registers with identity and caps */
+	*(u64 *)(kv->mock_bar_mem + KVCPU_REG_IDENT)   = 0x4B564350555F4350ULL;
+	*(u64 *)(kv->mock_bar_mem + KVCPU_REG_VERSION) = 0x00010002ULL; /* v1.2 */
+	*(u64 *)(kv->mock_bar_mem + KVCPU_REG_CAP)     = KVCPU_CAP_NMCE | KVCPU_CAP_HEPC | 
+	                                                 KVCPU_CAP_RTBD | KVCPU_CAP_PREFIX;
+	*(u64 *)(kv->mock_bar_mem + KVCPU_REG_MEM_SIZE) = 4ULL << 30; /* 4 GiB */
+	*(u64 *)(kv->mock_bar_mem + KVCPU_REG_RTBD_CAP) = 65536;
+
+	/* In mock mode, we use a vmalloc region for T1 memory */
+	kv->mock_t1_mem = vmalloc(4ULL << 30);
+	if (!kv->mock_t1_mem) {
+		ret = -ENOMEM;
+		goto err_t1;
+	}
+
+	/* ── Subsystem init ────────────────────────────────────────────────── */
+	/* Note: kvcpu_mem_register will be updated to handle mock mode */
+	ret = kvcpu_mem_register(kv);
+	if (ret) goto err_mem;
+
+	ret = kvcpu_hepc_init(kv);
+	if (ret) goto err_hepc;
+
+	ret = kvcpu_nmce_init(kv);
+	if (ret) goto err_nmce;
+
+	/* Char device */
+	minor = ida_alloc(&kvcpu_ida, GFP_KERNEL);
+	if (minor < 0) {
+		ret = minor;
+		goto err_cdev;
+	}
+
+	cdev_init(&kv->cdev, &kvcpu_fops);
+	kv->cdev.owner = THIS_MODULE;
+	ret = cdev_add(&kv->cdev, MKDEV(MAJOR(kvcpu_devt), minor), 1);
+	if (ret) goto err_cdev_add;
+
+	kv->dev = device_create(kvcpu_class, NULL, MKDEV(MAJOR(kvcpu_devt), minor),
+				kv, "kvcpu%d", minor);
+	if (IS_ERR(kv->dev)) {
+		ret = PTR_ERR(kv->dev);
+		goto err_dev_create;
+	}
+
+	ret = kvcpu_sysfs_init(kv);
+	if (ret) dev_warn(kv->dev, "sysfs init failed: %d\n", ret);
+
+	/* Store for cleanup */
+	mock_kv_dev = kv;
+
+	dev_info(kv->dev, "KV-CPU Mock Device ready | T1=4 GiB (Emulated)\n");
+	return 0;
+
+err_dev_create:
+	cdev_del(&kv->cdev);
+err_cdev_add:
+	ida_free(&kvcpu_ida, minor);
+err_cdev:
+	kvcpu_nmce_teardown(kv);
+err_nmce:
+err_hepc:
+	kvcpu_mem_unregister(kv);
+err_mem:
+	vfree(kv->mock_t1_mem);
+err_t1:
+	free_page((unsigned long)kv->mock_bar_mem);
+err_bar:
+	kfree(kv);
+	return ret;
+}
+
+static void kvcpu_mock_remove(struct kvcpu_dev *kv)
+{
+	int minor = MINOR(kv->cdev.dev);
+
+	kvcpu_sysfs_teardown(kv);
+	device_destroy(kvcpu_class, MKDEV(MAJOR(kvcpu_devt), minor));
+	cdev_del(&kv->cdev);
+	ida_free(&kvcpu_ida, minor);
+
+	kvcpu_nmce_teardown(kv);
+	kvcpu_mem_unregister(kv);
+
+	vfree(kv->mock_t1_mem);
+	free_page((unsigned long)kv->mock_bar_mem);
+	kfree(kv);
+}
+
 /* ── Module init / exit ──────────────────────────────────────────────────── */
 static int __init kvcpu_init(void)
 {
@@ -439,20 +554,34 @@ static int __init kvcpu_init(void)
 		return ret;
 	}
 
-	ret = pci_register_driver(&kvcpu_pci_driver);
-	if (ret) {
-		class_destroy(kvcpu_class);
-		unregister_chrdev_region(kvcpu_devt, 64);
-		return ret;
+	if (mock) {
+		ret = kvcpu_mock_probe();
+		if (ret) {
+			class_destroy(kvcpu_class);
+			unregister_chrdev_region(kvcpu_devt, 64);
+			return ret;
+		}
+	} else {
+		ret = pci_register_driver(&kvcpu_pci_driver);
+		if (ret) {
+			class_destroy(kvcpu_class);
+			unregister_chrdev_region(kvcpu_devt, 64);
+			return ret;
+		}
 	}
 
-	pr_info("kv_cpu: driver loaded v%s\n", DRIVER_VERSION);
+	pr_info("kv_cpu: driver loaded v%s (%s mode)\n", 
+		DRIVER_VERSION, mock ? "emulation" : "hardware");
 	return 0;
 }
 
 static void __exit kvcpu_exit(void)
 {
-	pci_unregister_driver(&kvcpu_pci_driver);
+	if (mock) {
+		if (mock_kv_dev) kvcpu_mock_remove(mock_kv_dev);
+	} else {
+		pci_unregister_driver(&kvcpu_pci_driver);
+	}
 	class_destroy(kvcpu_class);
 	unregister_chrdev_region(kvcpu_devt, 64);
 	pr_info("kv_cpu: driver unloaded\n");

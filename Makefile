@@ -24,7 +24,8 @@ kv_cpu-y := src/kv_cpu_main.o   \
              src/kv_cpu_madvise.o\
              src/kv_cpu_ioring.o \
              src/kv_cpu_rtbd.o   \
-             src/kv_cpu_sysfs.o
+             src/kv_cpu_sysfs.o  \
+             src/kv_cpu_mock.o
 
 ccflags-y := -I$(src)/include -Wall -Wextra -Wno-unused-parameter
 

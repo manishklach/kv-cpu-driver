@@ -60,6 +60,15 @@ int kvcpu_mem_register(struct kvcpu_dev *kv)
 	resource_size_t size;
 	int ret, nid;
 
+	if (kv->is_mock) {
+		kv->mem.base = 0x1000000000ULL; /* dummy 64GB+ base */
+		kv->mem.size = 4ULL << 30;      /* 4 GiB */
+		kv->mem.numa_node = 1;         /* assume node 1 for mock */
+		dev_info(kv->dev, "T1 Memory (Emulated) initialized at virt %p\n", 
+			 kv->mock_t1_mem);
+		return 0;
+	}
+
 	base = (phys_addr_t)kvcpu_readq(kv, KVCPU_REG_MEM_BASE);
 	size = (resource_size_t)kvcpu_readq(kv, KVCPU_REG_MEM_SIZE);
 
@@ -188,6 +197,11 @@ err_mtype:
 
 void kvcpu_mem_unregister(struct kvcpu_dev *kv)
 {
+	if (kv->is_mock) {
+		dev_info(kv->dev, "T1 memory region (emulated) unregistered\n");
+		return;
+	}
+
 	if (!kv->mem.base)
 		return;
 

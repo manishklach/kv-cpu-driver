@@ -30,27 +30,39 @@ int kvcpu_nmce_init(struct kvcpu_dev *kv)
 	size_t cq_bytes = KVCPU_CQ_ENTRIES * sizeof(struct kvcpu_cqe);
 
 	spin_lock_init(&q->lock);
-
-	/* Allocate coherent DMA memory for SQ */
-	q->sq = dma_alloc_coherent(&kv->pdev->dev, sq_bytes,
-				   &q->sq_dma, GFP_KERNEL);
-	if (!q->sq) {
-		dev_err(kv->dev, "NMCE: SQ DMA alloc failed (%zu bytes)\n", sq_bytes);
-		return -ENOMEM;
-	}
-
-	/* Allocate coherent DMA memory for CQ */
-	q->cq = dma_alloc_coherent(&kv->pdev->dev, cq_bytes,
-				   &q->cq_dma, GFP_KERNEL);
-	if (!q->cq) {
-		dev_err(kv->dev, "NMCE: CQ DMA alloc failed (%zu bytes)\n", cq_bytes);
-		dma_free_coherent(&kv->pdev->dev, sq_bytes, q->sq, q->sq_dma);
-		q->sq = NULL;
-		return -ENOMEM;
-	}
-
 	q->sq_tail = 0;
 	q->cq_head = 0;
+
+	if (kv->is_mock) {
+		q->sq = kzalloc(sq_bytes, GFP_KERNEL);
+		q->cq = kzalloc(cq_bytes, GFP_KERNEL);
+		if (!q->sq || !q->cq) {
+			kfree(q->sq); kfree(q->cq);
+			return -ENOMEM;
+		}
+		q->sq_dma = (dma_addr_t)q->sq;
+		q->cq_dma = (dma_addr_t)q->cq;
+	} else {
+		/* Allocate coherent DMA memory for SQ */
+		q->sq = dma_alloc_coherent(&kv->pdev->dev, sq_bytes,
+					   &q->sq_dma, GFP_KERNEL);
+		if (!q->sq) {
+			dev_err(kv->dev, "NMCE: SQ DMA alloc failed (%zu bytes)\n", sq_bytes);
+			return -ENOMEM;
+		}
+
+		/* Allocate coherent DMA memory for CQ */
+		q->cq = dma_alloc_coherent(&kv->pdev->dev, cq_bytes,
+					   &q->cq_dma, GFP_KERNEL);
+		if (!q->cq) {
+			dev_err(kv->dev, "NMCE: CQ DMA alloc failed (%zu bytes)\n", cq_bytes);
+			dma_free_coherent(&kv->pdev->dev, sq_bytes, q->sq, q->sq_dma);
+			q->sq = NULL;
+			return -ENOMEM;
+		}
+	}
+
+
 
 	/* Program queue base addresses and sizes into hardware */
 	kvcpu_writeq(kv, KVCPU_REG_SQ_BASE, (u64)q->sq_dma);
@@ -84,12 +96,18 @@ void kvcpu_nmce_teardown(struct kvcpu_dev *kv)
 	if (timeout == 0)
 		dev_warn(kv->dev, "NMCE teardown: timeout waiting for idle\n");
 
-	dma_free_coherent(&kv->pdev->dev,
-			  KVCPU_SQ_ENTRIES * sizeof(struct kvcpu_sqe),
-			  q->sq, q->sq_dma);
-	dma_free_coherent(&kv->pdev->dev,
-			  KVCPU_CQ_ENTRIES * sizeof(struct kvcpu_cqe),
-			  q->cq, q->cq_dma);
+	if (kv->is_mock) {
+		kvcpu_mock_teardown(kv);
+		kfree(q->sq);
+		kfree(q->cq);
+	} else {
+		dma_free_coherent(&kv->pdev->dev,
+				  KVCPU_SQ_ENTRIES * sizeof(struct kvcpu_sqe),
+				  q->sq, q->sq_dma);
+		dma_free_coherent(&kv->pdev->dev,
+				  KVCPU_CQ_ENTRIES * sizeof(struct kvcpu_cqe),
+				  q->cq, q->cq_dma);
+	}
 	q->sq = NULL;
 	q->cq = NULL;
 }
@@ -125,6 +143,9 @@ int kvcpu_nmce_submit(struct kvcpu_dev *kv, struct kvcpu_sqe *sqe)
 
 	/* Doorbell: write new tail — device starts processing immediately */
 	kvcpu_writeq(kv, KVCPU_REG_SQ_TAIL, q->sq_tail);
+
+	if (unlikely(kv->is_mock))
+		kvcpu_mock_nmce_submit(kv, sqe);
 
 	spin_unlock_irqrestore(&q->lock, flags);
 

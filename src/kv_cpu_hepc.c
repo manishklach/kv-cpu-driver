@@ -54,6 +54,9 @@ int kvcpu_hepc_init(struct kvcpu_dev *kv)
 		 cfg->evict_threshold, cfg->prefetch_threshold, cfg->window_w,
 		 cfg->weight_r, cfg->weight_f, cfg->weight_s, cfg->weight_d);
 
+	if (kv->is_mock)
+		return kvcpu_mock_init(kv);
+
 	return 0;
 }
 
@@ -83,6 +86,9 @@ void kvcpu_hepc_step_advance(struct kvcpu_dev *kv, u64 step)
 	 */
 	wmb();
 	kvcpu_writeq(kv, KVCPU_REG_STEP_ADVANCE, step);
+
+	if (unlikely(kv->is_mock))
+		kvcpu_mock_step_advance(kv, step);
 
 	dev_dbg(kv->dev, "step_advance: t=%llu\n", step);
 }

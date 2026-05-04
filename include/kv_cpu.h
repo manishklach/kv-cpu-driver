@@ -219,16 +219,29 @@ struct kvcpu_dev {
 
 	/* sysfs */
 	struct kobject           *kobj;
+
+	/* Mock Mode state */
+	bool                      is_mock;
+	void                     *mock_bar_mem;  /* Page allocated for mock BAR */
+	void                     *mock_t1_mem;   /* vmalloc region for mock T1 */
+	struct task_struct       *mock_thread;   /* Thread to simulate HEPC logic */
+	void                     *mock_state;    /* Internal state for mock logic */
 };
 
 /* ── Register accessors (MMIO) ──────────────────────────────────────────── */
 static inline u64 kvcpu_readq(struct kvcpu_dev *kv, u32 off)
 {
+	if (unlikely(kv->is_mock))
+		return *(u64 *)(kv->mock_bar_mem + off);
 	return readq(kv->bar + off);
 }
 
 static inline void kvcpu_writeq(struct kvcpu_dev *kv, u32 off, u64 val)
 {
+	if (unlikely(kv->is_mock)) {
+		*(u64 *)(kv->mock_bar_mem + off) = val;
+		return;
+	}
 	writeq(val, kv->bar + off);
 }
 
@@ -272,6 +285,12 @@ int  kvcpu_rtbd_release(struct kvcpu_dev *kv, phys_addr_t block_pa, u16 req_id);
 int  kvcpu_rtbd_query(struct kvcpu_dev *kv, phys_addr_t block_pa,
 		      struct kvcpu_rtbd_entry *out);
 int  kvcpu_rtbd_flush(struct kvcpu_dev *kv, u16 req_id);
+
+/* kv_cpu_mock.c */
+int  kvcpu_mock_init(struct kvcpu_dev *kv);
+void kvcpu_mock_teardown(struct kvcpu_dev *kv);
+void kvcpu_mock_step_advance(struct kvcpu_dev *kv, u64 step);
+int  kvcpu_mock_nmce_submit(struct kvcpu_dev *kv, struct kvcpu_sqe *sqe);
 
 /* Extended madvise behavior codes (to be added to linux/mman.h upstream) */
 #define MADV_KV_HOT      25   /* KV blocks are hot — boost priority to max   */
