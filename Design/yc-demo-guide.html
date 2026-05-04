@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YC Demo Guide | KV-CPU Semantic Control Plane</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0b0b0d;
+            --panel: #16161a;
+            --accent: #00d4ff;
+            --hardware: #ffaa00;
+            --text: #e1e1e6;
+            --text-dim: #94949e;
+            --border: #2d2d33;
+            --success: #00ff88;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 60px;
+            padding-bottom: 40px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .badge {
+            display: inline-block;
+            background: rgba(0, 212, 255, 0.1);
+            color: var(--accent);
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(0, 212, 255, 0.2);
+        }
+
+        h1 {
+            font-size: 3rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #fff, var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .thesis {
+            font-size: 1.2rem;
+            color: var(--text-dim);
+            max-width: 600px;
+            margin: auto;
+        }
+
+        section {
+            margin-bottom: 60px;
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            margin-bottom: 25px;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        h2::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            transition: transform 0.2s;
+        }
+
+        .card:hover {
+            border-color: var(--accent);
+        }
+
+        .step-title {
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            display: block;
+            color: var(--hardware);
+        }
+
+        .terminal {
+            background: #000;
+            border-radius: 8px;
+            padding: 20px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.9rem;
+            margin: 20px 0;
+            border: 1px solid #333;
+            position: relative;
+        }
+
+        .terminal::before {
+            content: 'bash';
+            position: absolute;
+            top: -10px;
+            right: 20px;
+            background: #333;
+            padding: 2px 10px;
+            font-size: 0.7rem;
+            border-radius: 4px;
+            color: #888;
+        }
+
+        .terminal code { color: var(--success); }
+        .terminal .prompt { color: var(--accent); margin-right: 10px; }
+
+        .script-box {
+            background: rgba(255, 170, 0, 0.05);
+            border-left: 4px solid var(--hardware);
+            padding: 20px;
+            border-radius: 0 8px 8px 0;
+            margin-top: 15px;
+        }
+
+        .script-box strong { color: var(--hardware); display: block; margin-bottom: 5px; }
+
+        .yc-box {
+            background: linear-gradient(135deg, rgba(255, 170, 0, 0.1), rgba(0, 212, 255, 0.05));
+            border: 1px solid var(--hardware);
+            padding: 40px;
+            border-radius: 16px;
+            text-align: center;
+            font-style: italic;
+            font-size: 1.1rem;
+            line-height: 1.8;
+        }
+
+        .yc-box strong { color: var(--hardware); font-style: normal; }
+
+        footer {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-dim);
+            font-size: 0.9rem;
+            border-top: 1px solid var(--border);
+        }
+
+        strong.highlight { color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <span class="badge">YC Demo Guide</span>
+            <h1>KV-CPU Pitch Narrative</h1>
+            <p class="thesis">Inference is becoming memory-orchestration bound. We've built the semantic control plane for the LLM era.</p>
+        </header>
+
+        <section>
+            <h2>01. The Setup</h2>
+            <div class="card">
+                <span class="step-title">Initializing the Control Plane</span>
+                <p>We load the driver in <strong>Mock Mode</strong> to demonstrate the architectural bridge without requiring physical hardware.</p>
+                <div class="terminal">
+                    <span class="prompt">$</span><code>sudo insmod kv_cpu.ko mock=1</code><br>
+                    <span class="prompt">$</span><code>ls -l /dev/kvcpu0</code>
+                </div>
+                <div class="script-box">
+                    <strong>Talking Point:</strong> "Notice /dev/kvcpu0. This isn't just a buffer; it's the industry's first standardized 'Inference Control Plane.' It allows the OS to understand what is happening inside the LLM runtime."
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>02. The Signaling</h2>
+            <div class="card">
+                <span class="step-title">Decode Step Synchronization</span>
+                <p>During inference, the runtime signals every decode iteration.</p>
+                <div class="terminal">
+                    <span class="prompt">$</span><code>./tools/kvctl step 256</code>
+                </div>
+                <div class="script-box">
+                    <strong>Talking Point:</strong> "As the model generates tokens, we signal the 'Step' to the kernel. In a real KV-CPU, this triggers an autonomous hardware scan that re-scores the priority of every block in memory in nanoseconds."
+                </div>
+            </div>
+
+            <div class="card">
+                <span class="step-title">Semantic Policies (HOT/EVICT)</span>
+                <p>Protecting shared prefixes from "blind" OS eviction.</p>
+                <div class="terminal">
+                    <span class="prompt">$</span><code>./tools/kvctl hot 0x7f001000 4096</code>
+                </div>
+                <div class="script-box">
+                    <strong>Talking Point:</strong> "Standard Linux is 'semantic-blind'—it might evict a critical shared prefix. We signal it as HOT, ensuring the hardware locks it into the fastest memory tier."
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>03. The Moat</h2>
+            <div class="card">
+                <span class="step-title">Proactive Orchestration</span>
+                <p>Eliminating prefetch latency by signaling future needs.</p>
+                <div class="terminal">
+                    <span class="prompt">$</span><code>./tools/kvctl prefetch 0x8f0000 4096 512</code>
+                </div>
+                <div class="script-box">
+                    <strong>Talking Point:</strong> "Finally, we signal the future. By hinting exactly when a block will be needed, the KV-CPU migrates data in the background, completely hiding the latency of memory tiering."
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <div class="yc-box">
+                "The KV-CPU team is attacking the context-window bottleneck where it is most expensive: the memory orchestration layer. By moving eviction logic from slow software to <strong>step-aware hardware</strong>, they are building the 'Control Plane for AI Infrastructure'—a high-leverage position in the stack."<br><br>
+                <strong>— YC Partner Interpretation</strong>
+            </div>
+        </section>
+
+        <footer>
+            &copy; 2026 KV-CPU PROJECT | Deep Tech Infrastructure | Confidential
+        </footer>
+    </div>
+</body>
+</html>
