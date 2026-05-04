@@ -1,0 +1,25 @@
+# Kernel build artifacts
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.symvers
+*.order
+.tmp_versions/
+Module.symvers
+modules.order
+
+# Build directories
+.cache/
+*.d
+
+# Editor / OS
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+
+# Test binaries
+tools/test/kvcpu_test
