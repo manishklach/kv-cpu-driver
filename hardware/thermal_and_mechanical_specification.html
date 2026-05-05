@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>KV-CPU v1.5 | Full RTL & Thermal Specification</title>
+    <style>
+        :root { --accent: #00d4ff; --bg: #0d0d0e; --panel: #1a1a1c; --code-bg: #000; --logic-green: #50fa7b; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: #d1d1d6; padding: 40px; line-height: 1.6; }
+        .wrapper { max-width: 1200px; margin: auto; border: 1px solid #333; border-radius: 12px; background: var(--panel); overflow: hidden; }
+        .hero { background: linear-gradient(135deg, #004a7c, #00d4ff); padding: 50px; color: white; border-bottom: 2px solid var(--accent); }
+        .section { padding: 40px; border-bottom: 1px solid #333; }
+        h2 { color: var(--accent); text-transform: uppercase; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        .code-block { background: var(--code-bg); color: var(--logic-green); padding: 20px; border-radius: 8px; font-family: 'Fira Code', monospace; font-size: 0.85rem; overflow-x: auto; border: 1px solid #333; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+        .stat-card { background: #252528; padding: 20px; border-radius: 8px; border-left: 4px solid var(--accent); }
+        .decision-tree { border: 2px dashed #444; padding: 20px; text-align: center; border-radius: 12px; background: #111; }
+        .formula { font-size: 1.2rem; color: #ffaa00; margin: 20px 0; text-align: center; }
+        footer { padding: 20px; text-align: center; font-size: 0.8rem; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div class="hero">
+            <h1>KV-CPU v1.5 Hardware Blueprint</h1>
+            <p><strong>RTL Logic, Thermal Management & Decision FSM</strong> | Ref: kv_cpu_patent_v3.pdf</p>
+        </div>
+
+        <div class="section">
+            <h2>1. NMCE DPU Array (RTL Logic)</h2>
+            <p>The SystemVerilog core for the Near-Memory Compute Engine (Quadrant A):</p>
+            <div class="code-block">
+// 128-wide Systolic MAC Unit<br>
+always_ff @(posedge clk) begin<br>
+&nbsp;&nbsp;for (int i = 0; i < B; i++) begin<br>
+&nbsp;&nbsp;&nbsp;&nbsp;dot_prod = 0;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;for (int j = 0; j < D; j++) begin<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;dot_prod += query[j] * key_sram[i][j];<br>
+&nbsp;&nbsp;&nbsp;&nbsp;end<br>
+&nbsp;&nbsp;&nbsp;&nbsp;out_score[i] = piecewise_exp(dot_prod * scale);<br>
+&nbsp;&nbsp;end<br>
+end
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>2. Thermal & Mechanical Environment</h2>
+            <div class="grid">
+                <div class="stat-card">
+                    <h3>Power Profile[cite: 1]</h3>
+                    <ul>
+                        <li><strong>Peak Active:</strong> 20W - 28W</li>
+                        <li><strong>Idle State:</strong> 8W - 12W</li>
+                        <li><strong>Voltage (Core):</strong> 0.75V (N5/N7)</li>
+                    </ul>
+                </div>
+                <div class="stat-card">
+                    <h3>Physical Specs[cite: 1]</h3>
+                    <ul>
+                        <li><strong>Form Factor:</strong> PCIe HHHL / EDSFF E3.S</li>
+                        <li><strong>Cooling:</strong> Passive Heatsink + Forced Air</li>
+                        <li><strong>Interposer:</strong> 55 µm Silicon Pitch</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>3. Autonomous Decision Logic</h2>
+            <p>Hardware-enforced priority scoring for KV-block migration[cite: 1]:</p>
+            <div class="formula">
+                $$P(B_i) = w_r \cdot R + w_f \cdot F + w_s \cdot S + w_d \cdot D \pmod{2^{16}}$$
+            </div>
+            <div class="decision-tree">
+                <p><strong>[Step-Advance]</strong> -> Recompute Priority -> [Compare Thresh] -> <strong>[Async DMA Trigger]</strong></p>
+                <ul style="text-align: left; display: inline-block;">
+                    <li><strong>IF</strong> P(Bi) < Evict_T: <strong>Evict to T2/T3</strong>[cite: 1]</li>
+                    <li><strong>IF</strong> P(Bi) > Prefetch_T: <strong>Stage to T1</strong>[cite: 1]</li>
+                    <li><strong>IF</strong> Prefix_Flag=1: <strong>Guard in T1</strong>[cite: 1]</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>4. Memory Tier Architecture[cite: 1]</h2>
+            <table style="width:100%; border-collapse: collapse; background: #000;">
+                <tr style="background:#222; color:var(--accent);">
+                    <th style="padding:10px; border:1px solid #333;">Tier</th>
+                    <th style="padding:10px; border:1px solid #333;">Latency</th>
+                    <th style="padding:10px; border:1px solid #333;">Capacity</th>
+                    <th style="padding:10px; border:1px solid #333;">Compute?</th>
+                </tr>
+                <tr><td style="padding:10px; border:1px solid #333;">T0 (GPU HBM)</td><td>~100 ns</td><td>80-192 GB</td><td>Full (CUDA)</td></tr>
+                <tr style="color:var(--accent);"><td style="padding:10px; border:1px solid #333;">T1 (KV-CPU)</td><td>~150 ns</td><td>128-512 GB</td><td>Attention Scoring</td></tr>
+                <tr><td style="padding:10px; border:1px solid #333;">T2 (Host RAM)</td><td>~400 ns</td><td>4 TB+</td><td>None</td></tr>
+                <tr><td style="padding:10px; border:1px solid #333;">T3 (NVMe)</td><td>~100 µs</td><td>32 TB+</td><td>None</td></tr>
+            </table>
+        </div>
+
+        <footer>
+            PROVISIONAL PATENT FILED (INDIA) - KV-CPU PROJECT 2026 | VER. 1.5
+        </footer>
+    </div>
+</body>
+</html>
