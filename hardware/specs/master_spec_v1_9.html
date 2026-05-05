@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>KV-CPU v1.9 | Multi-Tenant Silicon Blueprint</title>
+    <style>
+        :root { --accent: #00d4ff; --bg: #0d0d0e; --panel: #1a1a1c; --logic: #50fa7b; --cam: #bf5af2; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: #d1d1d6; padding: 40px; line-height: 1.5; }
+        .wrapper { max-width: 1300px; margin: auto; border: 1px solid #333; border-radius: 12px; background: var(--panel); box-shadow: 0 30px 60px rgba(0,0,0,0.6); overflow: hidden; }
+        .hero { background: linear-gradient(135deg, #004a7c, #00d4ff); padding: 60px; border-bottom: 3px solid var(--accent); }
+        .section { padding: 40px; border-bottom: 1px solid #333; }
+        h1, h2, h3 { margin-top: 0; color: #fff; text-transform: uppercase; }
+        .card { padding: 25px; border-radius: 8px; background: #252528; border: 1px solid #3a3a3c; margin-bottom: 20px; }
+        .code-box { background: #000; color: var(--logic); padding: 20px; border-radius: 8px; font-family: 'Fira Code', monospace; font-size: 0.85rem; border: 1px solid #444; overflow-x: auto; }
+        .cam-logic { background: #0a0a0b; padding: 20px; border: 2px solid var(--cam); border-radius: 12px; text-align: center; margin: 20px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; background: #000; }
+        th, td { border: 1px solid #333; padding: 12px; text-align: left; font-size: 0.9rem; }
+        th { background: #1c1c1e; color: var(--accent); }
+        .formula { font-size: 1.4rem; color: #ffaa00; text-align: center; margin: 20px 0; }
+        .footer { padding: 30px; font-size: 0.8rem; color: #666; text-align: center; background: #111; }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div class="hero">
+            <h1>KV-CPU v1.9 Master Specification</h1>
+            <p><strong>Multi-Tenant Isolation & Hardware CAM Architecture</strong> | Ref: kv_cpu_patent_v3.pdf</p>
+        </div>
+
+        <div class="section">
+            <h2>I. RTBD Multi-Tenant Arbitration</h2>
+            <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div class="card">
+                    <h3>Request Isolation</h3>
+                    <p>Each KV block is tagged with a 16-bit <strong>Request_ID</strong> in hardware. This ensures that even if Request A and Request B share the same layer or head indices, their data is physically isolated in memory.</p>
+                </div>
+                <div class="card">
+                    <h3>The Prefix Exception</h3>
+                    <p>Request_ID <strong>0x0000</strong> is reserved for shared context (system prompts). Hardware reference counters prevent eviction as long as any active request depends on it.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>II. Hardware CAM Match-Line Logic</h2>
+            <p>To achieve single-cycle lookup across 65k entries, the RTBD uses a parallel comparator array:</p>
+            <div class="cam-logic">
+                <div style="color:var(--cam); font-weight:bold;">SRAM Core + 4T-Comparator Match Cell</div>
+                <p style="font-size: 0.9rem;">Match = (In_ID == Tag_ID) &amp;&amp; (In_Layer == Tag_Layer) &amp;&amp; (In_Token == Tag_Token)</p>
+                <div style="background:#222; height:2px; width:80%; margin:10px auto;"></div>
+                <p><strong>HIT:</strong> Resolve Phys_Addr &amp; Tier_Loc | <strong>MISS:</strong> Trigger HEPC Prefetch</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>III. Priority Score Decision Engine</h2>
+            <div class="formula">
+                $$P(B_i) = w_r \cdot R + w_f \cdot F + w_s \cdot S + w_d \cdot D \pmod{2^{16}}$$
+            </div>
+            <table>
+                <tr>
+                    <th>Component</th>
+                    <th>Hardware Trigger</th>
+                    <th>Semantic Meaning</th>
+                </tr>
+                <tr><td>Recency (R)</td><td>GPU Access Signal</td><td>Decays via decode steps, not wall-clock time.</td></tr>
+                <tr><td>Frequency (F)</td><td>Accumulator</td><td>Identifies system prompts vs temporary context.</td></tr>
+                <tr><td>Step Prox (S)</td><td>MMIO Write</td><td>Predicts proximity to current decode token step.</td></tr>
+                <tr><td>Prefix (D)</td><td>RTBD Flag</td><td>Absolute protection for shared context data.</td></tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>IV. Updated Register Map (BAR 0)</h2>
+            <div class="code-box">
+0x0000 : STEP_ADVANCE (32b) -> Triggers full HEPC re-scan<br>
+0x0030 : CONTEND_POLICY (8b) -> Configures Round-Robin vs Fixed-Priority arbitration<br>
+0x0120 : RTBD_HIT_COUNT (64b) -> Performance telemetry for cache hit/miss ratio
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>V. Packaging & Thermal Specs</h2>
+            <ul>
+                <li><strong>Max Operating Temp:</strong> 70°C (Junction)</li>
+                <li><strong>Voltage:</strong> 0.75V (Logic) / 1.1V (LPDDR5X)</li>
+                <li><strong>Bandwidth:</strong> 256 GB/s Aggregate Memory I/O</li>
+            </ul>
+        </div>
+
+        <div class="footer">
+            CONFIDENTIAL - FILED UNDER THE PATENTS ACT, 1970 (INDIA) | PROVISIONAL v1.9
+        </div>
+    </div>
+</body>
+</html>

@@ -15,3 +15,4 @@ This directory collects the hardware-side artifacts that complement the Linux co
 
 - The Linux driver in this repository is still a control-plane prototype.
 - These hardware files are design collateral, not a complete tapeout-ready implementation.
+- Some specification material is versioned as separate snapshots when it introduces substantial architectural additions such as multi-tenant arbitration.
