@@ -1,0 +1,13 @@
+*.md linguist-documentation
+docs/** linguist-documentation
+
+hardware/mmio/** linguist-documentation
+hardware/specs/** linguist-documentation
+hardware/thermal/** linguist-documentation
+hardware/diagrams/** linguist-documentation
+hardware/rtl/** linguist-vendored
+
+drivers/**/*.c linguist-language=C
+drivers/**/*.h linguist-language=C
+include/**/*.h linguist-language=C
+tools/*.c linguist-language=C
