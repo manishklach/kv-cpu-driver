@@ -5,6 +5,7 @@ This directory collects the hardware-side artifacts that complement the Linux co
 ## Layout
 
 - `rtl/`: SystemVerilog source for HEPC and NMCE-related logic blocks.
+- `verification/`: Focused SystemVerilog testbenches for hardware control logic.
 - `specs/`: Higher-level hardware specifications and narrative design notes.
 - `mmio/`: Register-map and RTBD/MMIO layout artifacts.
 - `thermal/`: Packaging, thermal, and mechanical notes.
