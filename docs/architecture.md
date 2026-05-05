@@ -6,6 +6,8 @@ This document describes the architectural flow of the KV-CPU reference driver, f
 
 The KV-CPU driver operates primarily as a **control-plane coordinator**. It does not sit in the data path of every memory access; instead, it provides the hardware with the "hints" necessary for the hardware to make autonomous data-movement decisions.
 
+This repository's current implementation is intentionally narrow: it forwards semantic hints to MMIO registers and does not perform VA-to-PA translation, GUP pinning, DMA descriptor setup, or RTBD entry management in software.
+
 ```text
 User Space (LLM Runtime)
     |
@@ -13,8 +15,8 @@ User Space (LLM Runtime)
     v
 Kernel (kv_cpu driver)
     |
-    | (2) Translate VA to PA
-    | (3) Map semantic -> Hardware Register
+    | (2) Validate userspace payload
+    | (3) Map semantic -> MMIO register write
     v
 KV-CPU Hardware
     |
@@ -58,19 +60,19 @@ In autoregressive inference, the "temperature" or "value" of a KV-cache block ch
 - **Hardware Action:** This triggers the **HEPC (Hardware Eviction Policy Controller)** to perform a new scan cycle across all cached blocks to update their step-proximity scores ($w_s \cdot S$).
 
 ### 2. Metadata Handling (RTBD)
-The **RTBD (Request-Tagged Block Directory)** acts as a hardware-accelerated page table for KV-blocks.
-- **Driver Role:** When a block is allocated or shared (prefix sharing), the driver updates the RTBD metadata (e.g., `ref_count`).
-- **Semantic Mapping:** The driver maps "Request IDs" from the LLM runtime to hardware tags, allowing the hardware to group blocks belonging to the same inference stream.
+The **RTBD (Request-Tagged Block Directory)** remains a hardware-side concept in this prototype.
+- **Current Driver Role:** The driver only forwards semantic hints such as `HOT`, `EVICT`, `PREFETCH`, and `SHARE_PREFIX` to MMIO registers.
+- **Future Production Path:** A fuller implementation could map runtime request identifiers to hardware tags and update RTBD metadata explicitly.
 
 ### 3. Prefix Sharing Concept
 Prefix sharing is handled via a **Reference Counting** mechanism exposed to the driver.
 - When multiple requests share a common prefix (e.g., a long system prompt), the runtime calls `KV_CPU_SHARE_PREFIX`.
-- The driver signals the RTBD to increment a hardware reference counter.
+- The current prototype signals a dedicated MMIO register pair for the shared range.
 - The HEPC uses this counter as a "stickiness" weight ($w_d \cdot D$), preventing frequently shared prefixes from being evicted to slow tiers (T2/T3).
 
 ### 4. Separation of Control vs. Data Plane
 - **Control Plane:** Handled by this driver (`madvise`, `ioctl`). Includes policy updates, step signals, and lifecycle hints.
-- **Data Plane:** Handled by the **NMCE (Near-Memory Compute Engine)** and standard CXL.mem protocols. The driver sets up the descriptors, but the hardware autonomously moves data between T1 LPDDR5X and host memory without per-block kernel intervention.
+- **Data Plane:** Not implemented in this repository. The architectural intent is that future hardware blocks such as the **NMCE (Near-Memory Compute Engine)** and DMA engines would move data autonomously once signaled by the control plane.
 
 ## Summary of Design Philosophy
 The driver follows the **"Kernel as Policy Manager"** philosophy. It provides the mechanism for userspace to express intent, while delegating the heavy lifting of block-by-block management to silicon-level controllers.

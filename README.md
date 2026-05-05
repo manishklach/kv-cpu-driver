@@ -68,6 +68,8 @@ The following table clarifies the scope of this reference implementation versus 
 3.  **PREFETCH:** Runtime hints that a block will be needed at `STEP 256`. Hardware DMA autonomously moves the block from DRAM to LPDDR.
 4.  **EVICT:** Runtime marks a completed request's cache as `EVICTABLE`. Hardware immediately reclaims the space.
 
+In this reference implementation, these lifecycle operations are modeled as MMIO control signals only. No DMA submission, page pinning, or physical data movement is performed by the driver.
+
 ---
 
 ## Build & Run

@@ -54,18 +54,23 @@ static int kv_cpu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return -ENOMEM;
 
 	kv->pdev = pdev;
+	mutex_init(&kv->cmd_lock);
 	pci_set_drvdata(pdev, kv);
 
 	ret = pci_enable_device(pdev);
 	if (ret)
 		return ret;
 
+	ret = pci_request_regions(pdev, DRIVER_NAME);
+	if (ret)
+		goto err_disable;
+
 	pci_set_master(pdev);
 
 	kv->bar0 = pci_iomap(pdev, 0, 0);
 	if (!kv->bar0) {
 		ret = -ENOMEM;
-		goto err_disable;
+		goto err_release_regions;
 	}
 
 	instance = ida_alloc(&kv_cpu_ida, GFP_KERNEL);
@@ -97,6 +102,8 @@ err_ida:
 	ida_free(&kv_cpu_ida, instance);
 err_iounmap:
 	pci_iounmap(pdev, kv->bar0);
+err_release_regions:
+	pci_release_regions(pdev);
 err_disable:
 	pci_disable_device(pdev);
 	return ret;
@@ -111,6 +118,7 @@ static void kv_cpu_remove(struct pci_dev *pdev)
 	cdev_del(&kv->cdev);
 	ida_free(&kv_cpu_ida, instance);
 	pci_iounmap(pdev, kv->bar0);
+	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 }
 
@@ -150,6 +158,7 @@ static int __init kv_cpu_init(void)
 		}
 
 		mock_inst->is_mock = true;
+		mutex_init(&mock_inst->cmd_lock);
 		mock_inst->mock_bar = kzalloc(0x1000, GFP_KERNEL);
 		if (!mock_inst->mock_bar) {
 			ret = -ENOMEM;

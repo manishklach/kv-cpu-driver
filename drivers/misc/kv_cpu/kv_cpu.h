@@ -11,6 +11,7 @@
 #include <linux/pci.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
+#include <linux/mutex.h>
 #include "../../../include/uapi/linux/kv_cpu.h"
 
 #define DRIVER_NAME "kv_cpu"
@@ -21,6 +22,11 @@
 #define KVCPU_REG_BOOST_LEN     0x0208
 #define KVCPU_REG_IMEVICT_ADDR  0x0210
 #define KVCPU_REG_IMEVICT_LEN   0x0218
+#define KVCPU_REG_PREFETCH_ADDR 0x0300
+#define KVCPU_REG_PREFETCH_LEN  0x0308
+#define KVCPU_REG_PREFETCH_STEP 0x0310
+#define KVCPU_REG_SHARE_ADDR    0x0400
+#define KVCPU_REG_SHARE_LEN     0x0408
 
 /**
  * struct kv_cpu_device - Main driver state
@@ -30,6 +36,7 @@
  * @dev: Pointer to the device created in sysfs
  * @is_mock: True if running without hardware
  * @mock_bar: Virtual memory used for MMIO in mock mode
+ * @cmd_lock: Serializes multi-register command submission
  */
 struct kv_cpu_device {
 	struct pci_dev		*pdev;
@@ -38,6 +45,7 @@ struct kv_cpu_device {
 	struct device		*dev;
 	bool			is_mock;
 	void			*mock_bar;
+	struct mutex		cmd_lock;
 };
 
 /* MMIO register access helpers */
