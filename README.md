@@ -28,6 +28,7 @@ This repository is a **control-plane prototype** and architectural reference. It
 -   **MMIO Abstraction:** A clean register-access layer with a robust **Mock Mode** for testing without physical hardware.
 -   **Userspace Utility:** A reference tool (`kvctl`) to demonstrate interaction with the driver.
 -   **Hardware Collateral:** Supporting RTL, MMIO, thermal, diagrams, and specification artifacts under [`hardware/`](./hardware).
+-   **FPGA Emulation Scaffold:** A Phase 1 emulation plan and starter integration structure under [`fpga/`](./fpga).
 
 ## Implementation Status
 
