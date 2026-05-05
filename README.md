@@ -27,7 +27,7 @@ This repository is a **control-plane prototype** and architectural reference. It
 -   **IOCTL Control Plane:** A standardized UAPI for signaling decode steps and block management.
 -   **MMIO Abstraction:** A clean register-access layer with a robust **Mock Mode** for testing without physical hardware.
 -   **Userspace Utility:** A reference tool (`kvctl`) to demonstrate interaction with the driver.
--   **Hardware Collateral:** Supporting RTL, MMIO, packaging, and detailed specification artifacts under [`hardware/`](./hardware).
+-   **Hardware Collateral:** Supporting RTL, MMIO, thermal, diagrams, and specification artifacts under [`hardware/`](./hardware).
 
 ## Implementation Status
 
