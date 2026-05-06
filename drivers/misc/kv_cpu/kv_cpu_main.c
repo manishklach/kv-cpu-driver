@@ -54,7 +54,7 @@ static int kv_cpu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return -ENOMEM;
 
 	kv->pdev = pdev;
-	mutex_init(&kv->cmd_lock);
+	spin_lock_init(&kv->cmd_lock);
 	pci_set_drvdata(pdev, kv);
 
 	ret = pci_enable_device(pdev);
@@ -158,7 +158,7 @@ static int __init kv_cpu_init(void)
 		}
 
 		mock_inst->is_mock = true;
-		mutex_init(&mock_inst->cmd_lock);
+		spin_lock_init(&mock_inst->cmd_lock);
 		mock_inst->mock_bar = kzalloc(0x1000, GFP_KERNEL);
 		if (!mock_inst->mock_bar) {
 			ret = -ENOMEM;

@@ -18,10 +18,13 @@ void kv_cpu_write_reg(struct kv_cpu_device *kv, u32 offset, u64 val)
 {
 	if (unlikely(kv->is_mock)) {
 		u64 *reg = (u64 *)(kv->mock_bar + offset);
+
+		wmb();
 		*reg = val;
 		return;
 	}
 
+	wmb();
 	writeq(val, kv->bar0 + offset);
 }
 

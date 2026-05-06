@@ -30,6 +30,7 @@ long kv_cpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	struct kv_cpu_device *kv = file->private_data;
 	struct kv_cpu_step_info step;
 	struct kv_cpu_block_info block;
+	unsigned long flags;
 
 	if (!kv)
 		return -ENODEV;
@@ -40,7 +41,9 @@ long kv_cpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 		
 		dev_dbg(kv->dev, "STEP %llu\n", step.step);
+		spin_lock_irqsave(&kv->cmd_lock, flags);
 		kv_cpu_cmd_step(kv, step.step);
+		spin_unlock_irqrestore(&kv->cmd_lock, flags);
 		break;
 
 	case KV_CPU_MARK_HOT:
@@ -50,9 +53,9 @@ long kv_cpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return -EINVAL;
 		
 		dev_dbg(kv->dev, "HOT range 0x%llx len %llu\n", block.va, block.len);
-		mutex_lock(&kv->cmd_lock);
+		spin_lock_irqsave(&kv->cmd_lock, flags);
 		kv_cpu_cmd_hot(kv, block.va, block.len);
-		mutex_unlock(&kv->cmd_lock);
+		spin_unlock_irqrestore(&kv->cmd_lock, flags);
 		break;
 
 	case KV_CPU_EVICT:
@@ -62,9 +65,9 @@ long kv_cpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return -EINVAL;
 		
 		dev_dbg(kv->dev, "EVICT range 0x%llx len %llu\n", block.va, block.len);
-		mutex_lock(&kv->cmd_lock);
+		spin_lock_irqsave(&kv->cmd_lock, flags);
 		kv_cpu_cmd_evict(kv, block.va, block.len);
-		mutex_unlock(&kv->cmd_lock);
+		spin_unlock_irqrestore(&kv->cmd_lock, flags);
 		break;
 
 	case KV_CPU_PREFETCH:
@@ -75,9 +78,9 @@ long kv_cpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		
 		dev_dbg(kv->dev, "PREFETCH range 0x%llx len %llu target %llu\n", 
 			block.va, block.len, block.target_step);
-		mutex_lock(&kv->cmd_lock);
+		spin_lock_irqsave(&kv->cmd_lock, flags);
 		kv_cpu_cmd_prefetch(kv, block.va, block.len, block.target_step);
-		mutex_unlock(&kv->cmd_lock);
+		spin_unlock_irqrestore(&kv->cmd_lock, flags);
 		break;
 
 	case KV_CPU_SHARE_PREFIX:
@@ -87,9 +90,9 @@ long kv_cpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return -EINVAL;
 		
 		dev_dbg(kv->dev, "SHARE range 0x%llx len %llu\n", block.va, block.len);
-		mutex_lock(&kv->cmd_lock);
+		spin_lock_irqsave(&kv->cmd_lock, flags);
 		kv_cpu_cmd_share(kv, block.va, block.len);
-		mutex_unlock(&kv->cmd_lock);
+		spin_unlock_irqrestore(&kv->cmd_lock, flags);
 		break;
 
 	default:

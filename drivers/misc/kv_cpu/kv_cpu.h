@@ -11,7 +11,7 @@
 #include <linux/pci.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
-#include <linux/mutex.h>
+#include <linux/spinlock.h>
 #include "../../../include/uapi/linux/kv_cpu.h"
 
 #define DRIVER_NAME "kv_cpu"
@@ -36,7 +36,7 @@
  * @dev: Pointer to the device created in sysfs
  * @is_mock: True if running without hardware
  * @mock_bar: Virtual memory used for MMIO in mock mode
- * @cmd_lock: Serializes multi-register command submission
+ * @cmd_lock: Serializes command submission to the MMIO window
  */
 struct kv_cpu_device {
 	struct pci_dev		*pdev;
@@ -45,7 +45,7 @@ struct kv_cpu_device {
 	struct device		*dev;
 	bool			is_mock;
 	void			*mock_bar;
-	struct mutex		cmd_lock;
+	spinlock_t		cmd_lock;
 };
 
 /* MMIO register access helpers */
