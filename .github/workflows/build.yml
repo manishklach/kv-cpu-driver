@@ -10,6 +10,11 @@ jobs:
     container:
       image: ubuntu:24.10
     steps:
+      - name: Point apt at Ubuntu old-releases
+        run: |
+          sed -i 's|http://archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          sed -i 's|http://security.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+
       - name: Install build dependencies
         run: |
           apt-get update
