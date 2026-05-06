@@ -1,7 +1,7 @@
 # vLLM Integration Sketch
 
-This directory contains the smallest concrete software-side adapter for the
-KV-CPU control plane.
+This directory contains a local software-side adapter for the KV-CPU control
+plane.
 
 ## What It Does
 
@@ -10,9 +10,17 @@ KV-CPU control plane.
 - `KvCpuDeviceAwareBlockAllocator` wraps an existing vLLM
   `DeviceAwareBlockAllocator` and adds `advance_decode_step()`, which calls
   `KV_CPU_STEP_ADVANCE` once per decode iteration.
+- Immutable block allocation and cached-prefix hits can emit
+  `KV_CPU_SHARE_PREFIX`, using either real block span metadata or a stable
+  synthetic span derived from block identity when running in mock mode.
+- `test_kv_cpu_allocator.py` gives a small local behavior test without needing a
+  real vLLM checkout.
+- `benchmark_harness.py` provides a synthetic benchmark scaffold for measuring
+  control-path overhead across context sizes.
 
 This keeps actual block allocation inside vLLM while making the KV-CPU
-step-synchronization handshake runnable today in driver mock mode.
+step-synchronization and prefix-sharing handshake runnable today in driver mock
+mode.
 
 ## Example
 
@@ -41,3 +49,10 @@ python3 integrations/vllm/kv_cpu_allocator.py 128
 
 That path is intentionally simple: it proves the runtime-to-driver handshake
 without requiring a patched vLLM tree in this repository.
+
+## Local Validation
+
+```bash
+python3 integrations/vllm/test_kv_cpu_allocator.py
+python3 integrations/vllm/benchmark_harness.py
+```
