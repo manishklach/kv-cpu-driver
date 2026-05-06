@@ -79,10 +79,20 @@ struct kv_cpu_device {
 	struct kv_cpu_telemetry_state telemetry;
 };
 
-/* MMIO register access helpers */
+/*
+ * MMIO register access helpers.
+ *
+ * Callers must hold @cmd_lock across any command submission sequence before
+ * entering these helpers so the device observes a coherent command stream.
+ */
 void kv_cpu_write_reg(struct kv_cpu_device *kv, u32 offset, u64 val);
 
-/* Command execution hooks */
+/*
+ * Command execution hooks.
+ *
+ * These helpers do not acquire @cmd_lock themselves; the caller is
+ * responsible for serializing access to the MMIO window.
+ */
 void kv_cpu_cmd_step(struct kv_cpu_device *kv, u64 step);
 void kv_cpu_cmd_hot(struct kv_cpu_device *kv, u64 va, u64 len);
 void kv_cpu_cmd_evict(struct kv_cpu_device *kv, u64 va, u64 len);

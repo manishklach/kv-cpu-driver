@@ -6,6 +6,7 @@
  */
 
 #include <linux/io.h>
+#include <linux/lockdep.h>
 #include "kv_cpu.h"
 
 /**
@@ -13,9 +14,13 @@
  * @kv: Pointer to device state
  * @offset: Register offset in BAR0
  * @val: 64-bit value to write
+ *
+ * The caller must hold kv->cmd_lock before entering this helper.
  */
 void kv_cpu_write_reg(struct kv_cpu_device *kv, u32 offset, u64 val)
 {
+	lockdep_assert_held(&kv->cmd_lock);
+
 	if (unlikely(kv->is_mock)) {
 		u64 *reg = (u64 *)(kv->mock_bar + offset);
 
