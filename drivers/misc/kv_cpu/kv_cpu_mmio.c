@@ -59,3 +59,15 @@ void kv_cpu_cmd_share(struct kv_cpu_device *kv, u64 va, u64 len)
 	kv_cpu_write_reg(kv, KVCPU_REG_SHARE_ADDR, va);
 	kv_cpu_write_reg(kv, KVCPU_REG_SHARE_LEN, len);
 }
+
+void kv_cpu_cmd_set_weights(struct kv_cpu_device *kv,
+			    const struct kv_cpu_weights_info *weights)
+{
+	kv_cpu_write_reg(kv, KVCPU_REG_WEIGHT_R, weights->w_r);
+	kv_cpu_write_reg(kv, KVCPU_REG_WEIGHT_F, weights->w_f);
+	kv_cpu_write_reg(kv, KVCPU_REG_WEIGHT_S, weights->w_s);
+	kv_cpu_write_reg(kv, KVCPU_REG_WEIGHT_D, weights->w_d);
+	kv_cpu_write_reg(kv, KVCPU_REG_EVICT_THRESH, weights->evict_thresh);
+	kv_cpu_write_reg(kv, KVCPU_REG_PREFETCH_THRESH,
+			 weights->prefetch_thresh);
+}

@@ -84,6 +84,54 @@ static int run_share_test(int fd)
 	return 0;
 }
 
+static int run_weights_test(int fd)
+{
+	struct kv_cpu_weights_info weights = {
+		.w_r = 3,
+		.w_f = 5,
+		.w_s = 7,
+		.w_d = 11,
+		.evict_thresh = 1024,
+		.prefetch_thresh = 40960,
+	};
+
+	if (ioctl(fd, KV_CPU_SET_WEIGHTS, &weights) < 0) {
+		perror("KV_CPU_SET_WEIGHTS");
+		return 1;
+	}
+
+	return 0;
+}
+
+static int run_telemetry_test(int fd)
+{
+	struct kv_cpu_telemetry_info telemetry;
+
+	memset(&telemetry, 0, sizeof(telemetry));
+	if (ioctl(fd, KV_CPU_GET_TELEMETRY, &telemetry) < 0) {
+		perror("KV_CPU_GET_TELEMETRY");
+		return 1;
+	}
+
+	if (telemetry.step_count != 1 || telemetry.hot_count != 1 ||
+	    telemetry.evict_count != 1 || telemetry.prefetch_count != 1 ||
+	    telemetry.share_count != 1) {
+		fprintf(stderr, "Unexpected telemetry counters: step=%llu hot=%llu evict=%llu prefetch=%llu share=%llu\n",
+			telemetry.step_count, telemetry.hot_count, telemetry.evict_count,
+			telemetry.prefetch_count, telemetry.share_count);
+		return 1;
+	}
+
+	if (telemetry.w_r != 3 || telemetry.w_f != 5 || telemetry.w_s != 7 ||
+	    telemetry.w_d != 11 || telemetry.evict_thresh != 1024 ||
+	    telemetry.prefetch_thresh != 40960) {
+		fprintf(stderr, "Unexpected runtime weights in telemetry snapshot\n");
+		return 1;
+	}
+
+	return 0;
+}
+
 static int run_invalid_length_test(int fd)
 {
 	struct kv_cpu_block_info block = {
@@ -122,6 +170,8 @@ int main(void)
 	rc |= run_evict_test(fd);
 	rc |= run_prefetch_test(fd);
 	rc |= run_share_test(fd);
+	rc |= run_weights_test(fd);
+	rc |= run_telemetry_test(fd);
 	rc |= run_invalid_length_test(fd);
 
 	if (rc == 0)

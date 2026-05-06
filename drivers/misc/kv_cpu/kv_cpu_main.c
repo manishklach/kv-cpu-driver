@@ -24,6 +24,16 @@ static struct class *kv_cpu_class;
 static DEFINE_IDA(kv_cpu_ida);
 static struct kv_cpu_device *mock_inst;
 
+static void kv_cpu_init_runtime_defaults(struct kv_cpu_device *kv)
+{
+	kv->runtime.w_r = 1;
+	kv->runtime.w_f = 1;
+	kv->runtime.w_s = 2;
+	kv->runtime.w_d = 200;
+	kv->runtime.evict_thresh = 0x1000;
+	kv->runtime.prefetch_thresh = 0xE000;
+}
+
 static int kv_cpu_open(struct inode *inode, struct file *file)
 {
 	struct kv_cpu_device *kv = container_of(inode->i_cdev, struct kv_cpu_device, cdev);
@@ -55,6 +65,7 @@ static int kv_cpu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	kv->pdev = pdev;
 	spin_lock_init(&kv->cmd_lock);
+	kv_cpu_init_runtime_defaults(kv);
 	pci_set_drvdata(pdev, kv);
 
 	ret = pci_enable_device(pdev);
@@ -93,9 +104,16 @@ static int kv_cpu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto err_cdev;
 	}
 
+	dev_set_drvdata(kv->dev, kv);
+	ret = kv_cpu_sysfs_create(kv);
+	if (ret)
+		goto err_device;
+
 	dev_info(&pdev->dev, "KV-CPU device probed successfully\n");
 	return 0;
 
+err_device:
+	device_destroy(kv_cpu_class, kv->dev->devt);
 err_cdev:
 	cdev_del(&kv->cdev);
 err_ida:
@@ -114,6 +132,7 @@ static void kv_cpu_remove(struct pci_dev *pdev)
 	struct kv_cpu_device *kv = pci_get_drvdata(pdev);
 	int instance = MINOR(kv->dev->devt);
 
+	kv_cpu_sysfs_remove(kv);
 	device_destroy(kv_cpu_class, kv->dev->devt);
 	cdev_del(&kv->cdev);
 	ida_free(&kv_cpu_ida, instance);
@@ -159,6 +178,7 @@ static int __init kv_cpu_init(void)
 
 		mock_inst->is_mock = true;
 		spin_lock_init(&mock_inst->cmd_lock);
+		kv_cpu_init_runtime_defaults(mock_inst);
 		mock_inst->mock_bar = kzalloc(0x1000, GFP_KERNEL);
 		if (!mock_inst->mock_bar) {
 			ret = -ENOMEM;
@@ -178,6 +198,10 @@ static int __init kv_cpu_init(void)
 			ret = PTR_ERR(mock_inst->dev);
 			goto err_cdev_mock;
 		}
+		dev_set_drvdata(mock_inst->dev, mock_inst);
+		ret = kv_cpu_sysfs_create(mock_inst);
+		if (ret)
+			goto err_device_mock;
 		return 0;
 	}
 
@@ -187,6 +211,8 @@ static int __init kv_cpu_init(void)
 
 	return 0;
 
+err_device_mock:
+	device_destroy(kv_cpu_class, MKDEV(MAJOR(kv_cpu_devt), 0));
 err_cdev_mock:
 	cdev_del(&mock_inst->cdev);
 err_free_bar:
@@ -203,6 +229,7 @@ err_chrdev:
 static void __exit kv_cpu_exit(void)
 {
 	if (mock && mock_inst) {
+		kv_cpu_sysfs_remove(mock_inst);
 		device_destroy(kv_cpu_class, MKDEV(MAJOR(kv_cpu_devt), 0));
 		cdev_del(&mock_inst->cdev);
 		kfree(mock_inst->mock_bar);

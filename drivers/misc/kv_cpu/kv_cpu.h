@@ -27,6 +27,33 @@
 #define KVCPU_REG_PREFETCH_STEP 0x0310
 #define KVCPU_REG_SHARE_ADDR    0x0400
 #define KVCPU_REG_SHARE_LEN     0x0408
+#define KVCPU_REG_WEIGHT_R      0x0500
+#define KVCPU_REG_WEIGHT_F      0x0508
+#define KVCPU_REG_WEIGHT_S      0x0510
+#define KVCPU_REG_WEIGHT_D      0x0518
+#define KVCPU_REG_EVICT_THRESH  0x0520
+#define KVCPU_REG_PREFETCH_THRESH 0x0528
+
+struct kv_cpu_runtime_state {
+	u32 w_r;
+	u32 w_f;
+	u32 w_s;
+	u32 w_d;
+	u32 evict_thresh;
+	u32 prefetch_thresh;
+};
+
+struct kv_cpu_telemetry_state {
+	u64 current_step;
+	u64 step_count;
+	u64 hot_count;
+	u64 evict_count;
+	u64 prefetch_count;
+	u64 share_count;
+	u64 last_va;
+	u64 last_len;
+	u64 last_target_step;
+};
 
 /**
  * struct kv_cpu_device - Main driver state
@@ -37,6 +64,8 @@
  * @is_mock: True if running without hardware
  * @mock_bar: Virtual memory used for MMIO in mock mode
  * @cmd_lock: Serializes command submission to the MMIO window
+ * @runtime: Programmed HEPC weights and thresholds
+ * @telemetry: Control-plane activity counters and last-command state
  */
 struct kv_cpu_device {
 	struct pci_dev		*pdev;
@@ -46,6 +75,8 @@ struct kv_cpu_device {
 	bool			is_mock;
 	void			*mock_bar;
 	spinlock_t		cmd_lock;
+	struct kv_cpu_runtime_state runtime;
+	struct kv_cpu_telemetry_state telemetry;
 };
 
 /* MMIO register access helpers */
@@ -57,8 +88,13 @@ void kv_cpu_cmd_hot(struct kv_cpu_device *kv, u64 va, u64 len);
 void kv_cpu_cmd_evict(struct kv_cpu_device *kv, u64 va, u64 len);
 void kv_cpu_cmd_prefetch(struct kv_cpu_device *kv, u64 va, u64 len, u64 step);
 void kv_cpu_cmd_share(struct kv_cpu_device *kv, u64 va, u64 len);
+void kv_cpu_cmd_set_weights(struct kv_cpu_device *kv,
+			    const struct kv_cpu_weights_info *weights);
 
 /* ioctl dispatcher */
 long kv_cpu_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+
+int kv_cpu_sysfs_create(struct kv_cpu_device *kv);
+void kv_cpu_sysfs_remove(struct kv_cpu_device *kv);
 
 #endif /* _KV_CPU_H_ */
