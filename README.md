@@ -27,6 +27,7 @@ This repository is a **control-plane prototype** and architectural reference. It
 -   **IOCTL Control Plane:** A standardized UAPI for signaling decode steps and block management.
 -   **MMIO Abstraction:** A clean register-access layer with a robust **Mock Mode** for testing without physical hardware.
 -   **Userspace Utility:** A reference tool (`kvctl`) to demonstrate interaction with the driver.
+-   **vLLM Adapter Sketch:** A lightweight Python wrapper under [`integrations/vllm/`](./integrations/vllm) that can issue `STEP_ADVANCE` on each decode step against `/dev/kvcpu0`.
 -   **Hardware Collateral:** Supporting RTL, MMIO, thermal, diagrams, and specification artifacts under [`hardware/`](./hardware).
 -   **FPGA Emulation Scaffold:** A Phase 1 emulation plan and starter integration structure under [`fpga/`](./fpga).
 
@@ -95,6 +96,17 @@ sudo insmod kv_cpu.ko mock=1
 # Mark a range as HOT
 ./tools/kvctl hot 0x7f001000 4096
 ```
+
+### 4. Exercise the Python vLLM-Side Handshake
+```bash
+# Issue the same STEP_ADVANCE ioctl from Python
+python3 integrations/vllm/kv_cpu_allocator.py 128
+```
+
+The adapter in [`integrations/vllm/`](./integrations/vllm) is intentionally small:
+it wraps a vLLM-style allocator, delegates real block management to vLLM, and
+adds an explicit `advance_decode_step()` hook that can be called once per decode
+iteration in mock mode or against future hardware.
 
 ## Disclaimer
 
