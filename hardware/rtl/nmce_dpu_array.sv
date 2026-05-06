@@ -11,21 +11,35 @@ module nmce_dpu_array #(
     input  logic [15:0] scale_factor,      // 1/sqrt(D)
     output logic [15:0] scores [B-1:0]     // Scalar results to GPU
 );
+    logic signed [31:0] dot_prod     [B-1:0];
+    logic signed [31:0] scaled_score [B-1:0];
+    logic        [15:0] approx_score [B-1:0];
+
+    genvar i;
+
     // 128-wide systolic MAC array
-    // Computes Score[i] = (Q . K[i]) * Scale
-    always_ff @(posedge clk) begin
-        if (!rst_n) begin
-            scores <= '{default: 0};
-        end else begin
-            for (int i = 0; i < B; i++) begin
-                logic [31:0] dot_prod;
-                dot_prod = 0;
-                for (int j = 0; j < D; j++) begin
-                    dot_prod += q_vec[j] * k_block[i][j]; // MAC operation
-                end
-                // Apply scaling and pass to Exp() Approximation Unit
-                scores[i] <= approx_exp(dot_prod * scale_factor);
+    // Computes Score[i] = exp((Q . K[i]) * Scale) via the PWL approximation unit.
+    generate
+        for (i = 0; i < B; i++) begin : gen_nmce_scores
+            always_comb begin
+                dot_prod[i] = '0;
+                for (int j = 0; j < D; j++)
+                    dot_prod[i] += $signed(q_vec[j]) * $signed(k_block[i][j]);
             end
+
+            assign scaled_score[i] = dot_prod[i] * $signed({16'd0, scale_factor});
+
+            nmce_exp_approx_pwl exp_unit (
+                .x_in(scaled_score[i]),
+                .y_out(approx_score[i])
+            );
         end
+    endgenerate
+
+    always_ff @(posedge clk) begin
+        if (!rst_n)
+            scores <= '{default: 0};
+        else
+            scores <= approx_score;
     end
 endmodule
