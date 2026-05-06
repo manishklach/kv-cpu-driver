@@ -7,33 +7,41 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.10
     steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential \
+            git \
+            linux-headers-generic
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install Linux 6.11 headers
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            bc \
-            bison \
-            build-essential \
-            flex \
-            libelf-dev \
-            libssl-dev \
-            xz-utils
+          HEADER_PKG="$(apt-cache search '^linux-headers-6\.11\.0-.*generic$' | awk 'NR==1 {print $1}')"
+          if [ -z "$HEADER_PKG" ]; then
+            echo "No linux-headers-6.11.0-* package found" >&2
+            exit 1
+          fi
+          apt-get install -y "$HEADER_PKG"
+          echo "HEADER_PKG=$HEADER_PKG" >> "$GITHUB_ENV"
+          echo "KDIR=/usr/src/$HEADER_PKG" >> "$GITHUB_ENV"
 
-      - name: Download Linux 6.11 source
+      - name: Build kernel module
+        run: make KDIR="$KDIR" CONFIG_KV_CPU=m
+
+      - name: Build kvctl
+        run: gcc tools/kvctl.c -I include/uapi -o kvctl
+
+      - name: Smoke-check kvctl usage path
         run: |
-          mkdir -p .ci
-          curl -L https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.11.tar.xz -o .ci/linux-6.11.tar.xz
-          tar -C .ci -xf .ci/linux-6.11.tar.xz
-
-      - name: Prepare Linux 6.11 build tree
-        working-directory: .ci/linux-6.11
-        run: |
-          make defconfig
-          make modules_prepare
-
-      - name: Build driver and tools
-        run: make KDIR="$GITHUB_WORKSPACE/.ci/linux-6.11"
+          if ./kvctl; then
+            echo "kvctl unexpectedly succeeded without arguments" >&2
+            exit 1
+          fi
+          test $? -eq 1
