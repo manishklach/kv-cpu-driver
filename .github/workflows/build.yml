@@ -57,9 +57,17 @@ jobs:
         run: gcc tools/kvctl.c -I include/uapi -o kvctl
 
       - name: Smoke-check kvctl usage path
+        shell: bash
         run: |
-          if ./kvctl; then
+          set +e
+          ./kvctl
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
             echo "kvctl unexpectedly succeeded without arguments" >&2
             exit 1
           fi
-          test $? -eq 1
+          if [ "$status" -ne 1 ]; then
+            echo "kvctl exited with $status, expected 1" >&2
+            exit 1
+          fi
