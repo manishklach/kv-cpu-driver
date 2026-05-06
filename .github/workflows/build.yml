@@ -10,6 +10,12 @@ jobs:
     container:
       image: ubuntu:24.10
     steps:
+      - name: Show workflow revision
+        shell: bash
+        run: |
+          echo "github.sha=${{ github.sha }}"
+          bash --version | head -n 1
+
       - name: Point apt at Ubuntu old-releases
         shell: bash
         run: |
