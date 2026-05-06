@@ -1,0 +1,39 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            flex \
+            libelf-dev \
+            libssl-dev \
+            xz-utils
+
+      - name: Download Linux 6.11 source
+        run: |
+          mkdir -p .ci
+          curl -L https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.11.tar.xz -o .ci/linux-6.11.tar.xz
+          tar -C .ci -xf .ci/linux-6.11.tar.xz
+
+      - name: Prepare Linux 6.11 build tree
+        working-directory: .ci/linux-6.11
+        run: |
+          make defconfig
+          make modules_prepare
+
+      - name: Build driver and tools
+        run: make KDIR="$GITHUB_WORKSPACE/.ci/linux-6.11"
