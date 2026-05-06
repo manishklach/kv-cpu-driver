@@ -11,9 +11,10 @@ jobs:
       image: ubuntu:24.10
     steps:
       - name: Point apt at Ubuntu old-releases
+        shell: bash
         run: |
-          shopt -s nullglob
-          for path in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+          for path in /etc/apt/sources.list /etc/apt/sources.list.d/*; do
+            [ -f "$path" ] || continue
             sed -i 's|http://archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' "$path"
             sed -i 's|http://security.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' "$path"
             sed -i 's|https://archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' "$path"
