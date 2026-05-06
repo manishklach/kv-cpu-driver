@@ -1,0 +1,192 @@
+From mlachwani@gmail.com Mon May 06 00:00:00 2026
+From: Manish Keshav Lachwani <mlachwani@gmail.com>
+Date: Tue, 06 May 2026 00:00:00 +0530
+Subject: [RFC PATCH 0/4] mm/madvise: add MADV_KV_HOT/EVICT/PREFETCH for
+ AI inference KV-cache device control planes
+Message-ID: <20260506-kv-cpu-madvise-rfc-v1-0@gmail.com>
+To: linux-mm@kvack.org
+Cc: Andrew Morton <akpm@linux-foundation.org>,
+    Lorenzo Stoakes <lorenzo.stoakes@oracle.com>,
+    Vlastimil Babka <vbabka@suse.cz>,
+    David Hildenbrand <david@redhat.com>,
+    Michal Hocko <mhocko@suse.com>,
+    Johannes Weiner <hannes@cmpxchg.org>,
+    SeongJae Park <sj@kernel.org>,
+    Alistair Popple <apopple@nvidia.com>,
+    linux-api@vger.kernel.org,
+    linux-kernel@vger.kernel.org
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+This series introduces three new madvise(2) behavior codes targeted at
+AI inference workloads that use dedicated near-memory compute devices
+(such as CXL 3.0 companion chips) for KV-cache management.
+
+== Background ==
+
+Large language model (LLM) inference servers maintain a KV-cache: the
+key and value attention vectors accumulated for each input token, across
+all model layers and attention heads. This cache grows linearly with
+context length:
+
+  KV_memory(L) = 2 * N_layers * H_heads * D_head * L * sizeof(dtype)
+
+For a 70B-parameter model at 128k context length (increasingly common
+for agentic workloads), this is approximately 320 GB per active request,
+far exceeding GPU HBM capacity (~80 GB on H100). Production systems must
+therefore spill KV blocks to lower memory tiers -- CPU DRAM, CXL-attached
+memory, or NVMe -- and restore them on demand.
+
+The problem is that the kernel's existing memory management mechanisms
+are semantically blind to the access patterns of transformer decoding.
+LRU page replacement, kswapd, and even MADV_DONTNEED all operate on
+memory access history measured in wall-clock time and miss count.
+Transformer decoding has a completely different access pattern: it is
+structured by "decode step" -- the sequential position in the token
+generation loop. A KV block for token position 0 may be unaccessed for
+hundreds of decode steps then become critical again as the model's
+attention pattern sweeps back. No existing madvise behavior conveys
+this information to the kernel.
+
+== The Proposal ==
+
+This series introduces three new madvise behavior codes:
+
+  MADV_KV_HOT      (104)  -- mark KV blocks as actively in use
+  MADV_KV_EVICT    (105)  -- schedule KV blocks for immediate eviction
+  MADV_KV_PREFETCH (106)  -- hint current decode step + prefetch lookahead
+
+These behaviors are deliberately lightweight in the core mm path: they
+translate a userspace virtual address range to physical addresses and
+invoke an optional registered device handler. On systems without a
+registered handler, they are NOPs that return 0 (not -EINVAL), following
+the precedent of MADV_DONTDUMP on older kernels that did not support it.
+
+The registration mechanism uses a simple global pointer with RCU
+protection, supporting one device handler at a time. This is appropriate
+for the current hardware landscape where at most one KV-cache companion
+device would be present per host. A future series can extend this to a
+list if multiple devices become common.
+
+== Why madvise and not ioctl? ==
+
+The LLM runtime (e.g., vLLM, SGLang, TensorRT-LLM) manages KV-cache
+buffers as ordinary mmap'd memory regions. Having the advice mechanism
+go through madvise() means:
+
+  1. The LLM runtime does not need to open or track a device fd
+  2. The advice is naturally scoped to a virtual address range, which is
+     already how KV-cache blocks are tracked in these runtimes
+  3. Future kernel memory tiering logic (numa_balancing, memory_hotplug
+     demotion) can observe the same hints without going through a device
+     ioctl path
+  4. It is consistent with the existing convention of MADV_SEQUENTIAL,
+     MADV_WILLNEED, etc. for expressing access intent to the kernel
+
+The device driver still exposes an ioctl fallback
+(KV_CPU_STEP_ADVANCE, KV_CPU_MARK_HOT, etc.) for processes that prefer
+not to use madvise, but the madvise path is the preferred interface for
+integration with existing LLM serving frameworks.
+
+== Interaction with existing madvise behaviors ==
+
+MADV_KV_HOT does not conflict with MADV_WILLNEED. MADV_WILLNEED causes
+the kernel to begin faulting pages into the page cache. MADV_KV_HOT
+signals to a registered hardware device that a range of already-resident
+KV blocks should be protected from eviction. The two can be used
+together.
+
+MADV_KV_EVICT is semantically distinct from MADV_DONTNEED. MADV_DONTNEED
+discards pages and frees physical memory. MADV_KV_EVICT schedules
+migration of KV blocks to a lower memory tier (T2/T3) managed by the
+companion device, without discarding the data.
+
+MADV_KV_PREFETCH is not a replacement for MADV_WILLNEED but a decode-
+step-semantic hint that carries information (the current generation step t
+and a lookahead window W) that has no analogue in any existing behavior.
+
+== Value range ==
+
+Values 26-99 are unassigned. Values 100-103 are now assigned
+(MADV_POPULATE_READ=22, MADV_POPULATE_WRITE=23, MADV_DONTNEED_LOCKED=24,
+MADV_COLLAPSE=25, MADV_GUARD_INSTALL=102, MADV_GUARD_REMOVE=103).
+
+This series uses 104-106. These values are chosen to:
+  - Follow immediately after the guard page values (102-103)
+  - Leave gap values 26-99 and 100-101 available for other subsystems
+  - Avoid the 0-25 "dense" range which requires arch-specific overrides
+    in alpha, mips, parisc, and xtensa
+
+== Patch overview ==
+
+  [1/4] mm: madvise: add device handler registration for KV-cache hints
+        Adds the kv_madvise_handler infrastructure: a registration
+        function, RCU-protected handler pointer, and the dispatch
+        scaffolding in do_madvise().
+
+  [2/4] uapi: asm-generic: mman-common: add MADV_KV_HOT/EVICT/PREFETCH
+        Adds the three new MADV_KV_* constants to the generic UAPI header
+        and the four arch-specific overrides (alpha, mips, parisc, xtensa).
+
+  [3/4] mm: madvise: implement MADV_KV_HOT, MADV_KV_EVICT,
+                                MADV_KV_PREFETCH handlers
+        Implements the core madvise handler for each behavior, including
+        VA-to-PA translation, handler dispatch, and NOP fallback.
+
+  [4/4] selftests/mm: add tests for MADV_KV_HOT/EVICT/PREFETCH
+        Adds kselftest coverage: basic syscall return values, NOP
+        behavior without registered handler, and (on KV-CPU hardware)
+        register-write verification.
+
+== Reference implementation ==
+
+The KV-CPU Linux driver that consumes these interfaces is available at:
+  https://github.com/manishklach/kv-cpu-driver
+
+The driver registers a handler via kv_madvise_register_handler() during
+PCI probe and unregisters on remove. The reference userspace integration
+is in tools/kvctl.c and an example vLLM integration sketch is in
+docs/vllm-integration.md.
+
+== Open questions for the community ==
+
+  1. Should we use a list of handlers (for multiple devices) rather than
+     a single global pointer from the start? Initial thinking: the single-
+     pointer approach is sufficient for current hardware; over-engineering
+     for a multi-device topology that does not yet exist seems premature.
+
+  2. Should MADV_KV_PREFETCH carry its aux data (step, lookahead) in a
+     separate syscall argument, or is encoding both values into the 'arg'
+     parameter (high 32 bits = lookahead, low 32 bits = step) acceptable?
+     The madvise(2) syscall currently has no 'flags' or 'arg' parameter,
+     so this would require either (a) a new madvise_ex() syscall, (b) use
+     of prctl(), or (c) encoding data in the length field with a
+     well-defined convention. This RFC currently uses approach (c) for
+     MADV_KV_PREFETCH as the least invasive option -- feedback welcome.
+
+  3. The VA-to-PA translation uses get_user_pages_fast(). For large
+     multi-page KV blocks this issues one GUP call per page. A future
+     optimisation could use contiguous-mapping detection to batch this,
+     but is not required for correctness.
+
+Manish Keshav Lachwani (4):
+  mm: madvise: add device handler registration for KV-cache hints
+  uapi: asm-generic: mman-common: add MADV_KV_HOT/EVICT/PREFETCH
+  mm: madvise: implement MADV_KV_HOT, MADV_KV_EVICT, MADV_KV_PREFETCH
+  selftests/mm: add tests for MADV_KV_HOT/EVICT/PREFETCH
+
+ include/linux/kv_madvise.h                        |  61 +++++
+ include/uapi/asm-generic/mman-common.h             |   6 +
+ arch/alpha/include/uapi/asm/mman.h                 |   6 +
+ arch/mips/include/uapi/asm/mman.h                  |   6 +
+ arch/parisc/include/uapi/asm/mman.h                |   6 +
+ arch/xtensa/include/uapi/asm/mman.h                |   6 +
+ mm/madvise.c                                       | 112 ++++++++++
+ mm/kv_madvise.c                                    | 171 +++++++++++++++
+ tools/include/uapi/asm-generic/mman-common.h       |   6 +
+ tools/testing/selftests/mm/kv_madvise_test.c       | 220 ++++++++++++++++++++
+ tools/testing/selftests/mm/Makefile                |   1 +
+ 11 files changed, 601 insertions(+)
+
+--
+2.43.0

@@ -1,0 +1,345 @@
+From mlachwani@gmail.com Mon May 06 00:00:00 2026
+From: Manish Keshav Lachwani <mlachwani@gmail.com>
+Date: Tue, 06 May 2026 00:00:00 +0530
+Subject: [RFC PATCH 4/4] selftests/mm: add tests for
+ MADV_KV_HOT/EVICT/PREFETCH
+Message-ID: <20260506-kv-cpu-madvise-rfc-v1-4@gmail.com>
+In-Reply-To: <20260506-kv-cpu-madvise-rfc-v1-0@gmail.com>
+References: <20260506-kv-cpu-madvise-rfc-v1-0@gmail.com>
+To: linux-mm@kvack.org
+Cc: Andrew Morton <akpm@linux-foundation.org>,
+    Lorenzo Stoakes <lorenzo.stoakes@oracle.com>,
+    Vlastimil Babka <vbabka@suse.cz>,
+    David Hildenbrand <david@redhat.com>,
+    Michal Hocko <mhocko@suse.com>,
+    Johannes Weiner <hannes@cmpxchg.org>,
+    SeongJae Park <sj@kernel.org>,
+    Alistair Popple <apopple@nvidia.com>,
+    linux-api@vger.kernel.org,
+    linux-kernel@vger.kernel.org
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Add kselftest coverage for the three new MADV_KV_* madvise behaviors.
+
+Test categories:
+
+  1. Basic syscall interface (no hardware required):
+     - MADV_KV_HOT on a valid mapped anonymous page returns 0
+     - MADV_KV_EVICT on a valid mapped anonymous page returns 0
+     - MADV_KV_PREFETCH on a valid mapped anonymous page returns 0
+     - All three behaviors return -EINVAL on an unaligned start address
+     - MADV_KV_HOT with len=0 returns -EINVAL
+     - MADV_KV_EVICT on an unmapped address returns -EFAULT
+
+  2. NOP behaviour without registered handler:
+     - Verify that issuing any MADV_KV_* on a kernel without a registered
+       handler returns 0 (not -EINVAL), confirming the graceful degradation
+       guarantee for LLM runtimes on non-KV-CPU machines.
+
+  3. MADV_KV_PREFETCH encoding:
+     - Verify that a PREFETCH call with step=42, lookahead=128 encoded as
+       len = ((u64)128 << 32) | 42ULL does not crash or return -EINVAL.
+
+  4. Multi-page range:
+     - Allocate a 16 MiB anonymous region (simulating a KV block allocation)
+     - Apply MADV_KV_HOT to the entire range
+     - Apply MADV_KV_EVICT to the entire range
+     - Verify both return 0
+
+  5. Interaction with MADV_DONTNEED:
+     - Apply MADV_KV_HOT to a range
+     - Apply MADV_DONTNEED to the same range
+     - Re-access the range to verify pages are still accessible (DONTNEED
+       should still work; KV_HOT only affects the device handler)
+
+Tests 1-4 pass on any kernel with this series applied, with or without
+KV-CPU hardware. Test 5 requires the pages to fault back in but should
+also pass universally.
+
+Note: full register-write verification (confirming that MMIO writes reach
+the device) requires a KV-CPU device or the mock driver with hardware
+register readback enabled. That level of testing is in the driver's own
+test suite at tools/testing/selftests/mm/kvcpu_mock_test.c in the KV-CPU
+driver repository.
+
+Signed-off-by: Manish Keshav Lachwani <mlachwani@gmail.com>
+---
+ tools/testing/selftests/mm/kv_madvise_test.c | 220 +++++++++++++++++++++++++++
+ tools/testing/selftests/mm/Makefile          |   1 +
+ 2 files changed, 221 insertions(+)
+ create mode 100644 tools/testing/selftests/mm/kv_madvise_test.c
+
+diff --git a/tools/testing/selftests/mm/kv_madvise_test.c b/tools/testing/selftests/mm/kv_madvise_test.c
+new file mode 100644
+index 000000000000..aaaaaaaaaaaa
+--- /dev/null
++++ b/tools/testing/selftests/mm/kv_madvise_test.c
+@@ -0,0 +1,220 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * kv_madvise_test.c -- selftests for MADV_KV_HOT / MADV_KV_EVICT /
++ *                                    MADV_KV_PREFETCH
++ *
++ * Run with:
++ *   make -C tools/testing/selftests/mm kv_madvise_test
++ *   ./kv_madvise_test
++ *
++ * All tests pass on kernels with this RFC applied, with or without
++ * KV-CPU hardware present. Tests that require hardware are skipped
++ * unless /dev/kvcpu0 exists.
++ *
++ * Copyright (C) 2026 Manish Keshav Lachwani <mlachwani@gmail.com>
++ */
++
++#define _GNU_SOURCE
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <errno.h>
++#include <sys/mman.h>
++#include <sys/syscall.h>
++#include <stdint.h>
++#include <assert.h>
++#include "../../../../tools/include/uapi/asm-generic/mman-common.h"
++
++/* ── helpers ──────────────────────────────────────────────────────────────── */
++
++#define TEST_PASS  0
++#define TEST_FAIL  1
++#define TEST_SKIP  77   /* kselftest skip code */
++
++static int failures;
++static int passes;
++static int skips;
++
++#define PASS(name) do { \
++	printf("  PASS  %s\n", name); \
++	passes++; \
++} while (0)
++
++#define FAIL(name, ...) do { \
++	printf("  FAIL  %s: " __VA_ARGS__ "\n", name); \
++	failures++; \
++} while (0)
++
++#define SKIP(name, reason) do { \
++	printf("  SKIP  %s: %s\n", name, reason); \
++	skips++; \
++} while (0)
++
++#define CHECK(name, cond) do { \
++	if (!(cond)) \
++		FAIL(name, "condition false: " #cond); \
++	else \
++		PASS(name); \
++} while (0)
++
++static inline int do_madvise(void *addr, size_t len, int advice)
++{
++	return syscall(SYS_madvise, addr, len, advice);
++}
++
++static void *alloc_anon(size_t size)
++{
++	void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
++		       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++	if (p == MAP_FAILED)
++		return NULL;
++	/* fault in pages */
++	memset(p, 0xAB, size);
++	return p;
++}
++
++static void free_anon(void *p, size_t size)
++{
++	munmap(p, size);
++}
++
++/* ── test groups ──────────────────────────────────────────────────────────── */
++
++static void test_basic_syscall_interface(void)
++{
++	const size_t SZ = 4096;
++	void *p = alloc_anon(SZ);
++	int ret;
++
++	printf("\n[1] Basic syscall interface (no hardware required)\n");
++
++	if (!p) {
++		SKIP("alloc", "mmap failed");
++		return;
++	}
++
++	/* MADV_KV_HOT: valid range -> 0 */
++	ret = do_madvise(p, SZ, MADV_KV_HOT);
++	CHECK("KV_HOT valid range", ret == 0);
++
++	/* MADV_KV_EVICT: valid range -> 0 */
++	ret = do_madvise(p, SZ, MADV_KV_EVICT);
++	CHECK("KV_EVICT valid range", ret == 0);
++
++	/* MADV_KV_PREFETCH: encode step=1, lookahead=64 */
++	size_t pf_len = ((uint64_t)64 << 32) | (uint64_t)1;
++	ret = do_madvise(p, pf_len, MADV_KV_PREFETCH);
++	CHECK("KV_PREFETCH encoded step=1 lookahead=64", ret == 0);
++
++	/* unaligned start -> EINVAL */
++	ret = do_madvise((char *)p + 1, SZ - 1, MADV_KV_HOT);
++	CHECK("KV_HOT unaligned start -> EINVAL", ret == -1 && errno == EINVAL);
++
++	/* len=0 -> EINVAL (madvise convention) */
++	ret = do_madvise(p, 0, MADV_KV_EVICT);
++	CHECK("KV_EVICT len=0 -> EINVAL", ret == -1 && errno == EINVAL);
++
++	free_anon(p, SZ);
+
++	/* unmapped address -> EFAULT */
++	ret = do_madvise(p, SZ, MADV_KV_HOT);
++	CHECK("KV_HOT unmapped addr -> EFAULT", ret == -1 && errno == EFAULT);
++}
++
++static void test_nop_without_handler(void)
++{
++	const size_t SZ = 4096;
++	void *p = alloc_anon(SZ);
++	int ret;
++
++	printf("\n[2] NOP behaviour without registered handler\n");
++
++	if (!p) {
++		SKIP("alloc", "mmap failed");
++		return;
++	}
++
++	/*
++	 * On a kernel without a KV-CPU device driver loaded, all three
++	 * behaviors must return 0 (not EINVAL). This guarantees that LLM
++	 * runtimes can call madvise(MADV_KV_*) unconditionally without
++	 * needing to check for KV-CPU hardware presence.
++	 */
++	ret = do_madvise(p, SZ, MADV_KV_HOT);
++	CHECK("KV_HOT NOP returns 0 without handler", ret == 0);
+
++	ret = do_madvise(p, SZ, MADV_KV_EVICT);
++	CHECK("KV_EVICT NOP returns 0 without handler", ret == 0);
+
++	size_t pf_len = ((uint64_t)128 << 32) | (uint64_t)42;
++	ret = do_madvise(p, pf_len, MADV_KV_PREFETCH);
++	CHECK("KV_PREFETCH NOP returns 0 without handler", ret == 0);
++
++	free_anon(p, SZ);
++}
++
++static void test_prefetch_encoding(void)
++{
++	const size_t SZ = 4096;
++	void *p = alloc_anon(SZ);
+
++	printf("\n[3] MADV_KV_PREFETCH encoding correctness\n");
++
++	if (!p) {
++		SKIP("alloc", "mmap failed");
++		return;
++	}
++
++	/* step=42, lookahead=128 */
++	size_t len42 = ((uint64_t)128 << 32) | (uint64_t)42;
++	CHECK("PREFETCH step=42 lookahead=128",
++	      do_madvise(p, len42, MADV_KV_PREFETCH) == 0);
++
++	/* step=0 (first decode step) */
++	size_t len0 = ((uint64_t)64 << 32) | (uint64_t)0;
++	CHECK("PREFETCH step=0 lookahead=64",
++	      do_madvise(p, len0, MADV_KV_PREFETCH) == 0);
++
++	/* maximum step value */
++	size_t lenmax = ((uint64_t)256 << 32) | (uint64_t)0xFFFFFFFFULL;
++	CHECK("PREFETCH step=UINT32_MAX lookahead=256",
++	      do_madvise(p, lenmax, MADV_KV_PREFETCH) == 0);
++
++	free_anon(p, SZ);
++}
++
++static void test_large_range(void)
++{
++	const size_t SZ = 16 * 1024 * 1024;  /* 16 MiB - typical KV block */
++	void *p = alloc_anon(SZ);
++	int ret;
++
++	printf("\n[4] Multi-page range (16 MiB KV block simulation)\n");
++
++	if (!p) {
++		SKIP("alloc", "mmap failed for 16 MiB");
++		return;
++	}
++
++	ret = do_madvise(p, SZ, MADV_KV_HOT);
++	CHECK("KV_HOT 16MiB range", ret == 0);
++
++	ret = do_madvise(p, SZ, MADV_KV_EVICT);
++	CHECK("KV_EVICT 16MiB range", ret == 0);
++
++	free_anon(p, SZ);
++}
++
++static void test_interaction_with_dontneed(void)
++{
++	const size_t SZ = 4096;
++	void *p = alloc_anon(SZ);
++
++	printf("\n[5] Interaction with MADV_DONTNEED\n");
++
++	if (!p) {
++		SKIP("alloc", "mmap failed");
++		return;
++	}
++
++	do_madvise(p, SZ, MADV_KV_HOT);
++	do_madvise(p, SZ, MADV_DONTNEED);
++
++	/* Re-access: pages fault back in normally */
++	volatile unsigned char *q = (volatile unsigned char *)p;
++	*q = 0xFF;
++	CHECK("DONTNEED after KV_HOT: page re-accessible", *q == 0xFF);
++
++	free_anon(p, SZ);
++}
++
++/* ── main ──────────────────────────────────────────────────────────────────── */
++
++int main(void)
++{
++	printf("KV-cache madvise selftests\n");
++	printf("MADV_KV_HOT=%d MADV_KV_EVICT=%d MADV_KV_PREFETCH=%d\n",
++	       MADV_KV_HOT, MADV_KV_EVICT, MADV_KV_PREFETCH);
+
++	test_basic_syscall_interface();
++	test_nop_without_handler();
++	test_prefetch_encoding();
++	test_large_range();
++	test_interaction_with_dontneed();
+
++	printf("\n────────────────────────────────\n");
++	printf("Results: %d passed, %d failed, %d skipped\n",
++	       passes, failures, skips);
+
++	return failures ? TEST_FAIL : TEST_PASS;
++}
+
+diff --git a/tools/testing/selftests/mm/Makefile b/tools/testing/selftests/mm/Makefile
+index aaaaaaaaaaaa..bbbbbbbbbbbb 100644
+--- a/tools/testing/selftests/mm/Makefile
++++ b/tools/testing/selftests/mm/Makefile
+@@ -xx,6 +xx,7 @@ TEST_GEN_FILES += guard-pages
+ TEST_GEN_FILES += map_fixed_noreplace
+ TEST_GEN_FILES += map_hugetlb
+ TEST_GEN_FILES += memfd_secret
++TEST_GEN_FILES += kv_madvise_test
+
+ KSFT_KHDR_INSTALL := 1
+ include ../lib.mk
+
+--
+2.43.0

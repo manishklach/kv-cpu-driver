@@ -1,0 +1,289 @@
+From mlachwani@gmail.com Mon May 06 00:00:00 2026
+From: Manish Keshav Lachwani <mlachwani@gmail.com>
+Date: Tue, 06 May 2026 00:00:00 +0530
+Subject: [RFC PATCH 3/4] mm: madvise: implement MADV_KV_HOT, MADV_KV_EVICT,
+ MADV_KV_PREFETCH handlers
+Message-ID: <20260506-kv-cpu-madvise-rfc-v1-3@gmail.com>
+In-Reply-To: <20260506-kv-cpu-madvise-rfc-v1-0@gmail.com>
+References: <20260506-kv-cpu-madvise-rfc-v1-0@gmail.com>
+To: linux-mm@kvack.org
+Cc: Andrew Morton <akpm@linux-foundation.org>,
+    Lorenzo Stoakes <lorenzo.stoakes@oracle.com>,
+    Vlastimil Babka <vbabka@suse.cz>,
+    David Hildenbrand <david@redhat.com>,
+    Michal Hocko <mhocko@suse.com>,
+    Johannes Weiner <hannes@cmpxchg.org>,
+    SeongJae Park <sj@kernel.org>,
+    Alistair Popple <apopple@nvidia.com>,
+    linux-api@vger.kernel.org,
+    linux-kernel@vger.kernel.org
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Implement the three KV-cache madvise behavior handlers in mm/madvise.c.
+
+The implementation adds:
+
+  madvise_kv_hot()        -- dispatches MADV_KV_HOT to registered handler
+  madvise_kv_evict()      -- dispatches MADV_KV_EVICT to registered handler
+  madvise_kv_prefetch()   -- decodes (step, lookahead) from len field,
+                             dispatches MADV_KV_PREFETCH
+
+  madvise_kv_range()      -- common entry point: VA-to-PA translation via
+                             get_user_pages_fast() + dispatch to behavior-
+                             specific function
+
+Changes to do_madvise():
+
+  1. madvise_kv_range() is added to the list of operations that do not
+     require mmap_lock (joining MADV_DONTNEED, MADV_FREE, etc.). These
+     behaviors translate the VA to PA independently and issue MMIO writes
+     to hardware; they do not walk or modify VMAs.
+
+  2. is_valid_madvise_behavior() is extended to accept 104-106 when a
+     handler is registered. When no handler is registered, these values
+     still pass validation and result in a NOP return (not EINVAL), so
+     that LLM runtime code that calls madvise() unconditionally does not
+     need to guard against EINVAL on non-KV-CPU machines.
+
+MADV_KV_PREFETCH encodes its auxiliary data in the @length argument
+using a well-defined convention: the upper 32 bits carry the prefetch
+lookahead window W (in decode steps) and the lower 32 bits carry the
+current decode step t. This avoids introducing a new syscall or a new
+madvise_ex() variant at this RFC stage. The length value is masked back
+to a page-aligned length for VA-to-PA purposes (lower 32 bits contain
+the step counter but the VA range length for GUP is taken from a
+separate len_bytes argument embedded in bits [63:32] of a separate
+argument -- see the open question in the cover letter about whether this
+encoding is the right approach). For this RFC the encoding is:
+
+  high32: ((u32)(lookahead_window))
+  low32:  ((u32)(decode_step))
+
+and the VA range length for GUP is passed as the normal @len parameter
+aligned to page size. The step and lookahead are extracted from the
+low 64-bits of @len before alignment:
+
+  u64 packed = (u64)len;
+  u32 step       = (u32)(packed & 0xFFFFFFFF);
+  u32 lookahead  = (u32)(packed >> 32);
+  size_t va_len  = PAGE_ALIGN(max(step, lookahead) * sizeof_kv_hint);
+
+This encoding is admittedly unusual. The RFC is an explicit request for
+feedback on whether a cleaner mechanism (madvise_ex(), separate ioctl,
+prctl, or a structured argument) would be preferred by the community.
+
+VA-to-PA translation notes:
+
+The handlers call get_user_pages_fast() to pin the first page of the
+range and derive its physical address. For the common case of LLM
+runtime KV buffers (allocated with mmap(MAP_HUGETLB) or cudaMallocHost),
+these are physically contiguous within a 2M hugepage boundary. The
+implementation currently assumes contiguity within the GUP'd region;
+a production version would iterate per-page for non-contiguous cases.
+This is noted in a FIXME comment.
+
+The handler is dispatched with the VMA's mmap_lock NOT held. The handler
+(a KV-cache device driver) issues MMIO writes and may acquire a
+spinlock; it must not sleep or call back into mm code.
+
+Signed-off-by: Manish Keshav Lachwani <mlachwani@gmail.com>
+---
+ mm/madvise.c | 112 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 112 insertions(+)
+
+diff --git a/mm/madvise.c b/mm/madvise.c
+index aaaaaaaaaa..bbbbbbbbbb 100644
+--- a/mm/madvise.c
++++ b/mm/madvise.c
+@@ -xx,6 +xx,7 @@
+ #include <linux/swapops.h>
+ #include <linux/shmem_fs.h>
+ #include <linux/ksm.h>
++#include <linux/kv_madvise.h>
+ #include <asm/tlb.h>
+
+ #include "internal.h"
+@@ -xx,6 +xx,117 @@ static int madvise_inject_error(int behavior,
+ }
+ #endif
+
++/*
++ * madvise_kv_translate_range - translate a userspace VA range to physical
++ * address for dispatch to a KV-cache device handler.
++ *
++ * Uses get_user_pages_fast() to pin the first page and derive PA.
++ * Assumes physical contiguity within the range (typical for hugetlb /
++ * cudaMallocHost allocations used by LLM runtimes).
++ *
++ * FIXME: iterate per-page for non-contiguous ranges.
++ *
++ * Returns physical address on success, 0 on failure.
++ */
++static phys_addr_t madvise_kv_translate_range(unsigned long start, size_t len)
++{
++	struct page *page;
++	phys_addr_t pa;
++	int nr;
++
++	if (!len || !IS_ALIGNED(start, PAGE_SIZE))
++		return 0;
++
++	nr = get_user_pages_fast(start, 1, 0, &page);
++	if (nr < 0)
++		return 0;
++	if (nr == 0)
++		return 0;
++
++	pa = page_to_phys(page);
++	put_page(page);
++	return pa;
++}
++
++/*
++ * madvise_kv_hot - MADV_KV_HOT handler.
++ *
++ * Marks the physical range [pa, pa+len) as hot in the registered KV-cache
++ * device. The device handler should set the eviction priority of all
++ * tracked KV blocks in this range to the maximum value (preventing eviction
++ * during the current decode loop iteration).
++ *
++ * Dispatches via kv_madvise_dispatch() which is a NOP if no handler is
++ * registered (returns 0, not -EINVAL).
++ */
++static long madvise_kv_hot(unsigned long start, size_t len)
++{
++	phys_addr_t pa;
++
++	pa = madvise_kv_translate_range(start, len);
++	if (!pa)
++		return -EFAULT;
++
++	return kv_madvise_dispatch(pa, len, MADV_KV_HOT, 0);
++}
++
++/*
++ * madvise_kv_evict - MADV_KV_EVICT handler.
++ *
++ * Schedules KV blocks in the physical range [pa, pa+len) for immediate
++ * background migration to a lower memory tier. The device handler should
++ * queue the blocks for async DMA eviction without blocking the caller.
++ *
++ * Semantically distinct from MADV_DONTNEED: data is migrated, not discarded.
++ */
++static long madvise_kv_evict(unsigned long start, size_t len)
++{
++	phys_addr_t pa;
++
++	pa = madvise_kv_translate_range(start, len);
++	if (!pa)
++		return -EFAULT;
++
++	return kv_madvise_dispatch(pa, len, MADV_KV_EVICT, 0);
++}
++
++/*
++ * madvise_kv_prefetch - MADV_KV_PREFETCH handler.
++ *
++ * Encodes the current decode step t and prefetch lookahead window W from
++ * the @len argument (high32 = W, low32 = t) and dispatches to the
++ * registered KV-cache device handler.
++ *
++ * The handler should:
++ *   1. Update its step-advance register to t (triggering a hardware
++ *      eviction/prefetch policy evaluation cycle)
++ *   2. Set its prefetch lookahead window to W decode steps
++ *
++ * This is the highest-frequency call in the series: it is called once
++ * per decode step from the LLM runtime's token generation loop.
++ */
++static long madvise_kv_prefetch(unsigned long start, size_t len)
++{
++	u64 packed    = (u64)len;
++	u32 step      = (u32)(packed & 0xFFFFFFFFULL);
++	u32 lookahead = (u32)(packed >> 32);
++	u64 aux       = ((u64)lookahead << 32) | (u64)step;
++	phys_addr_t pa;
++	/*
++	 * For PREFETCH, start+PAGE_SIZE is sufficient as the VA range --
++	 * the device only needs to update global step/window registers,
++	 * not translate an address range. We still require a valid mapped
++	 * page to prevent misuse from sandboxed processes.
++	 */
++	pa = madvise_kv_translate_range(start, PAGE_SIZE);
++	if (!pa)
++		return -EFAULT;
++
++	return kv_madvise_dispatch(pa, len, MADV_KV_PREFETCH, aux);
++}
++
++/*
++ * madvise_kv_range - dispatcher for all MADV_KV_* behaviors.
++ *
++ * Called from madvise_vma_behavior() for behaviors 104-106.
++ * Does not require mmap_lock (no VMA modification).
++ */
++static long madvise_kv_range(unsigned long start, size_t len, int behavior)
++{
++	switch (behavior) {
++	case MADV_KV_HOT:
++		return madvise_kv_hot(start, len);
++	case MADV_KV_EVICT:
++		return madvise_kv_evict(start, len);
++	case MADV_KV_PREFETCH:
++		return madvise_kv_prefetch(start, len);
++	default:
++		return -EINVAL;
++	}
++}
++
+ /*
+  * Application wants to free up the pages and associated backing store.
+  * This is effectively punching a hole into the middle of a file.
+@@ -xx,6 +xx,7 @@ static bool
+ madvise_behavior_valid(int behavior)
+ {
+ 	switch (behavior) {
++	case MADV_KV_HOT ... MADV_KV_PREFETCH:
++		/* valid when a handler is registered; NOP otherwise */
++		return true;
+ 	case MADV_DONTDUMP:
+ 	case MADV_DODUMP:
+ 	case MADV_NORMAL:
+@@ -xx,6 +xx,16 @@ madvise_behavior_valid(int behavior)
+ }
+
+ /*
++ * KV behaviors bypass VMA iteration entirely -- they translate the VA
++ * range to PA directly and dispatch to a device handler.
++ * Add them to the set of behaviors handled before mmap_lock.
++ */
++static bool madvise_kv_behavior(int behavior)
++{
++	return behavior >= MADV_KV_HOT && behavior <= MADV_KV_PREFETCH;
++}
++
++/*
+  * do_madvise: core implementation
+  */
+ int do_madvise(struct mm_struct *mm, unsigned long start, size_t len_in, int behavior)
+@@ -xx,6 +xx,16 @@ int do_madvise(struct mm_struct *mm, unsigned long start,
+ 	if (!madvise_behavior_valid(behavior))
+ 		return -EINVAL;
+
++	/*
++	 * KV-cache behaviors: dispatch directly without acquiring mmap_lock
++	 * or walking VMAs.
++	 */
++	if (madvise_kv_behavior(behavior)) {
++		if (!PAGE_ALIGNED(start))
++			return -EINVAL;
++		return madvise_kv_range(start, len_in, behavior);
++	}
++
+ 	if (!PAGE_ALIGNED(start))
+ 		return -EINVAL;
+ 	start = untagged_addr_remote(mm, start);
+
+--
+2.43.0

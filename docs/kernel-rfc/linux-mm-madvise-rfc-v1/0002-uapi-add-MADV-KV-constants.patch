@@ -1,0 +1,168 @@
+From mlachwani@gmail.com Mon May 06 00:00:00 2026
+From: Manish Keshav Lachwani <mlachwani@gmail.com>
+Date: Tue, 06 May 2026 00:00:00 +0530
+Subject: [RFC PATCH 2/4] uapi: asm-generic: mman-common: add
+ MADV_KV_HOT/EVICT/PREFETCH
+Message-ID: <20260506-kv-cpu-madvise-rfc-v1-2@gmail.com>
+In-Reply-To: <20260506-kv-cpu-madvise-rfc-v1-0@gmail.com>
+References: <20260506-kv-cpu-madvise-rfc-v1-0@gmail.com>
+To: linux-mm@kvack.org
+Cc: Andrew Morton <akpm@linux-foundation.org>,
+    Lorenzo Stoakes <lorenzo.stoakes@oracle.com>,
+    Vlastimil Babka <vbabka@suse.cz>,
+    David Hildenbrand <david@redhat.com>,
+    Michal Hocko <mhocko@suse.com>,
+    Johannes Weiner <hannes@cmpxchg.org>,
+    SeongJae Park <sj@kernel.org>,
+    Alistair Popple <apopple@nvidia.com>,
+    linux-api@vger.kernel.org,
+    linux-kernel@vger.kernel.org
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Add three new madvise behavior constants for AI inference KV-cache
+device control planes:
+
+  MADV_KV_HOT      (104) -- the specified range contains KV blocks
+                            actively used in a decode loop; a registered
+                            device handler should set their eviction
+                            priority to the maximum value
+
+  MADV_KV_EVICT    (105) -- the specified range of KV blocks is no
+                            longer needed by the caller; a registered
+                            device handler should schedule them for
+                            immediate background migration to a lower
+                            memory tier
+
+  MADV_KV_PREFETCH (106) -- hint to a registered device handler that
+                            the caller is at decode step t and desires
+                            a prefetch lookahead of W steps; aux data
+                            is encoded in the length field (high 32
+                            bits = W, low 32 bits = t) per RFC
+                            convention described in patch 3/4
+
+Values 104-106 are chosen to follow directly after the guard page values
+102-103 (MADV_GUARD_INSTALL, MADV_GUARD_REMOVE) added in v6.13.
+
+The four architectures (alpha, mips, parisc, xtensa) that define their
+own mman.h overrides for the 100-series range are updated identically to
+match the generic header, following the exact same pattern used by the
+MADV_GUARD_INSTALL/REMOVE additions in commit <guard-page-commit>.
+
+The tools/ mirror header is also updated so that kselftest and perf can
+reference these constants without pulling in the kernel headers directly.
+
+Signed-off-by: Manish Keshav Lachwani <mlachwani@gmail.com>
+---
+ include/uapi/asm-generic/mman-common.h         |  6 ++++++
+ arch/alpha/include/uapi/asm/mman.h             |  6 ++++++
+ arch/mips/include/uapi/asm/mman.h              |  6 ++++++
+ arch/parisc/include/uapi/asm/mman.h            |  6 ++++++
+ arch/xtensa/include/uapi/asm/mman.h            |  6 ++++++
+ tools/include/uapi/asm-generic/mman-common.h   |  6 ++++++
+ 6 files changed, 36 insertions(+)
+
+diff --git a/include/uapi/asm-generic/mman-common.h b/include/uapi/asm-generic/mman-common.h
+index 1ea2c4c33b86..eeeeeeeeeeee 100644
+--- a/include/uapi/asm-generic/mman-common.h
++++ b/include/uapi/asm-generic/mman-common.h
+@@ -79,6 +79,12 @@
+ #define MADV_GUARD_INSTALL 102		/* fatal signal on access to range */
+ #define MADV_GUARD_REMOVE  103		/* unguard range */
+
++#define MADV_KV_HOT        104		/* KV blocks are hot; protect from eviction */
++#define MADV_KV_EVICT      105		/* KV blocks not needed; migrate to lower tier */
++#define MADV_KV_PREFETCH   106		/* hint decode step + lookahead to KV device
++					 * len encodes: high32 = lookahead_window W,
++					 *              low32  = current decode step t */
++
+ /* compatibility flags */
+ #define MAP_FILE	0
+
+diff --git a/arch/alpha/include/uapi/asm/mman.h b/arch/alpha/include/uapi/asm/mman.h
+index 1e700468a685..ffffffffffff 100644
+--- a/arch/alpha/include/uapi/asm/mman.h
++++ b/arch/alpha/include/uapi/asm/mman.h
+@@ -81,6 +81,12 @@
+ #define MADV_GUARD_INSTALL 102		/* fatal signal on access to range */
+ #define MADV_GUARD_REMOVE  103		/* unguard range */
+
++#define MADV_KV_HOT        104		/* KV blocks are hot; protect from eviction */
++#define MADV_KV_EVICT      105		/* KV blocks not needed; migrate to lower tier */
++#define MADV_KV_PREFETCH   106		/* hint decode step + lookahead to KV device
++					 * len encodes: high32 = lookahead_window W,
++					 *              low32  = current decode step t */
++
+ /* compatibility flags */
+ #define MAP_FILE	0
+
+diff --git a/arch/mips/include/uapi/asm/mman.h b/arch/mips/include/uapi/asm/mman.h
+index bbbbbbbbbbbb..cccccccccccc 100644
+--- a/arch/mips/include/uapi/asm/mman.h
++++ b/arch/mips/include/uapi/asm/mman.h
+@@ -81,6 +81,12 @@
+ #define MADV_GUARD_INSTALL 102		/* fatal signal on access to range */
+ #define MADV_GUARD_REMOVE  103		/* unguard range */
+
++#define MADV_KV_HOT        104		/* KV blocks are hot; protect from eviction */
++#define MADV_KV_EVICT      105		/* KV blocks not needed; migrate to lower tier */
++#define MADV_KV_PREFETCH   106		/* hint decode step + lookahead to KV device
++					 * len encodes: high32 = lookahead_window W,
++					 *              low32  = current decode step t */
++
+ /* compatibility flags */
+ #define MAP_FILE	0
+
+diff --git a/arch/parisc/include/uapi/asm/mman.h b/arch/parisc/include/uapi/asm/mman.h
+index dddddddddddd..eeeeeeeeeeee 100644
+--- a/arch/parisc/include/uapi/asm/mman.h
++++ b/arch/parisc/include/uapi/asm/mman.h
+@@ -62,6 +62,12 @@
+ #define MADV_GUARD_INSTALL 102		/* fatal signal on access to range */
+ #define MADV_GUARD_REMOVE  103		/* unguard range */
+
++#define MADV_KV_HOT        104		/* KV blocks are hot; protect from eviction */
++#define MADV_KV_EVICT      105		/* KV blocks not needed; migrate to lower tier */
++#define MADV_KV_PREFETCH   106		/* hint decode step + lookahead to KV device
++					 * len encodes: high32 = lookahead_window W,
++					 *              low32  = current decode step t */
++
+ /* compatibility flags */
+ #define MAP_FILE	0
+
+diff --git a/arch/xtensa/include/uapi/asm/mman.h b/arch/xtensa/include/uapi/asm/mman.h
+index ffffffffffffffff..000000000000 100644
+--- a/arch/xtensa/include/uapi/asm/mman.h
++++ b/arch/xtensa/include/uapi/asm/mman.h
+@@ -87,6 +87,12 @@
+ #define MADV_GUARD_INSTALL 102		/* fatal signal on access to range */
+ #define MADV_GUARD_REMOVE  103		/* unguard range */
+
++#define MADV_KV_HOT        104		/* KV blocks are hot; protect from eviction */
++#define MADV_KV_EVICT      105		/* KV blocks not needed; migrate to lower tier */
++#define MADV_KV_PREFETCH   106		/* hint decode step + lookahead to KV device
++					 * len encodes: high32 = lookahead_window W,
++					 *              low32  = current decode step t */
++
+ /* compatibility flags */
+ #define MAP_FILE	0
+
+diff --git a/tools/include/uapi/asm-generic/mman-common.h b/tools/include/uapi/asm-generic/mman-common.h
+index 1ea2c4c33b86..ffffffffffffffff 100644
+--- a/tools/include/uapi/asm-generic/mman-common.h
++++ b/tools/include/uapi/asm-generic/mman-common.h
+@@ -79,6 +79,12 @@
+ #define MADV_GUARD_INSTALL 102		/* fatal signal on access to range */
+ #define MADV_GUARD_REMOVE  103		/* unguard range */
+
++#define MADV_KV_HOT        104		/* KV blocks are hot; protect from eviction */
++#define MADV_KV_EVICT      105		/* KV blocks not needed; migrate to lower tier */
++#define MADV_KV_PREFETCH   106		/* hint decode step + lookahead to KV device
++					 * len encodes: high32 = lookahead_window W,
++					 *              low32  = current decode step t */
++
+ /* compatibility flags */
+ #define MAP_FILE	0
+
+--
+2.43.0

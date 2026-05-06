@@ -1,0 +1,254 @@
+From mlachwani@gmail.com Mon May 06 00:00:00 2026
+From: Manish Keshav Lachwani <mlachwani@gmail.com>
+Date: Tue, 06 May 2026 00:00:00 +0530
+Subject: [RFC PATCH 1/4] mm: madvise: add device handler registration for
+ KV-cache hints
+Message-ID: <20260506-kv-cpu-madvise-rfc-v1-1@gmail.com>
+In-Reply-To: <20260506-kv-cpu-madvise-rfc-v1-0@gmail.com>
+References: <20260506-kv-cpu-madvise-rfc-v1-0@gmail.com>
+To: linux-mm@kvack.org
+Cc: Andrew Morton <akpm@linux-foundation.org>,
+    Lorenzo Stoakes <lorenzo.stoakes@oracle.com>,
+    Vlastimil Babka <vbabka@suse.cz>,
+    David Hildenbrand <david@redhat.com>,
+    Michal Hocko <mhocko@suse.com>,
+    Johannes Weiner <hannes@cmpxchg.org>,
+    SeongJae Park <sj@kernel.org>,
+    Alistair Popple <apopple@nvidia.com>,
+    linux-api@vger.kernel.org,
+    linux-kernel@vger.kernel.org
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Introduce the kv_madvise_handler infrastructure that allows a device
+driver to register a callback invoked when userspace issues one of the
+new MADV_KV_* madvise behaviors.
+
+The design is intentionally minimal:
+
+  - A single RCU-protected function pointer (kv_madvise_handler_fn)
+    stored in mm/kv_madvise.c. One device at a time is supported; this
+    matches the current hardware landscape where at most one KV-cache
+    companion device is present per host.
+
+  - kv_madvise_register_handler() / kv_madvise_unregister_handler():
+    exported symbols for device drivers. Return -EBUSY if a handler is
+    already registered.
+
+  - kv_madvise_dispatch(): called from do_madvise() after VA-to-PA
+    translation. If no handler is registered it returns 0 (NOP), not
+    -EINVAL, so existing userspace that issues these behaviors on
+    machines without a KV-CPU device does not get unexpected errors.
+
+  - kv_madvise_handler_registered(): inline predicate used in
+    do_madvise() to gate the is_valid_madvise_behavior() check so the
+    new behavior codes do not cause EINVAL on systems without a handler.
+
+The handler function signature is:
+
+  int (*kv_madvise_fn)(phys_addr_t pa, size_t len,
+                       int behavior, u64 aux);
+
+where aux carries behavior-specific data:
+  MADV_KV_HOT:      aux is 0 (unused)
+  MADV_KV_EVICT:    aux is 0 (unused)
+  MADV_KV_PREFETCH: aux = ((u64)lookahead_window << 32) | decode_step
+                    encoded from the length field per RFC convention
+                    (see patch 3/4)
+
+Signed-off-by: Manish Keshav Lachwani <mlachwani@gmail.com>
+---
+ include/linux/kv_madvise.h | 61 +++++++++++++++++++++++++++++++++++++
+ mm/kv_madvise.c            | 90 ++++++++++++++++++++++++++++++++++++++++++++
+ mm/Makefile                |  1 +
+ 3 files changed, 152 insertions(+)
+ create mode 100644 include/linux/kv_madvise.h
+ create mode 100644 mm/kv_madvise.c
+
+diff --git a/include/linux/kv_madvise.h b/include/linux/kv_madvise.h
+new file mode 100644
+index 000000000000..aaaaaaaaaaaa
+--- /dev/null
++++ b/include/linux/kv_madvise.h
+@@ -0,0 +1,61 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * kv_madvise.h -- KV-cache madvise device handler registration
++ *
++ * Device drivers (e.g., CXL 3.0 KV-cache companion chips) call
++ * kv_madvise_register_handler() during probe to receive callbacks
++ * when userspace issues MADV_KV_HOT, MADV_KV_EVICT, or
++ * MADV_KV_PREFETCH on memory ranges containing KV-cache blocks.
++ *
++ * Copyright (C) 2026 Manish Keshav Lachwani <mlachwani@gmail.com>
++ */
++
++#ifndef _LINUX_KV_MADVISE_H
++#define _LINUX_KV_MADVISE_H
++
++#include <linux/types.h>
++
++/**
++ * typedef kv_madvise_fn - handler callback type for KV-cache madvise hints
++ * @pa:       physical address of the start of the affected KV block range
++ * @len:      length in bytes of the affected range
++ * @behavior: one of MADV_KV_HOT (104), MADV_KV_EVICT (105),
++ *            MADV_KV_PREFETCH (106)
++ * @aux:      behavior-specific auxiliary data:
++ *            MADV_KV_HOT / MADV_KV_EVICT: 0 (unused)
++ *            MADV_KV_PREFETCH: high 32 bits = lookahead window W (decode
++ *            steps); low 32 bits = current decode step t
++ *
++ * The handler is called from process context with no mm locks held.
++ * It must not sleep for extended periods and must not call back into
++ * madvise(). It may issue MMIO writes and brief spinlock-protected
++ * operations. Return 0 on success, negative errno on error.
++ */
++typedef int (*kv_madvise_fn)(phys_addr_t pa, size_t len,
++			     int behavior, u64 aux);
++
++#ifdef CONFIG_KV_MADVISE
++
++int  kv_madvise_register_handler(kv_madvise_fn fn);
++void kv_madvise_unregister_handler(kv_madvise_fn fn);
++int  kv_madvise_dispatch(phys_addr_t pa, size_t len,
++			 int behavior, u64 aux);
++bool kv_madvise_handler_registered(void);
++
++#else /* !CONFIG_KV_MADVISE */
++
++static inline int kv_madvise_register_handler(kv_madvise_fn fn)
++{
++	return -EOPNOTSUPP;
++}
++static inline void kv_madvise_unregister_handler(kv_madvise_fn fn) {}
++static inline int kv_madvise_dispatch(phys_addr_t pa, size_t len,
++				      int behavior, u64 aux)
++{
++	return 0; /* NOP: no handler */
++}
++static inline bool kv_madvise_handler_registered(void)
++{
++	return false;
++}
++
++#endif /* CONFIG_KV_MADVISE */
++#endif /* _LINUX_KV_MADVISE_H */
+
+diff --git a/mm/kv_madvise.c b/mm/kv_madvise.c
+new file mode 100644
+index 000000000000..bbbbbbbbbbbb
+--- /dev/null
++++ b/mm/kv_madvise.c
+@@ -0,0 +1,90 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * mm/kv_madvise.c -- KV-cache madvise device handler registration
++ *
++ * Provides a single-device registration point for drivers that wish
++ * to receive MADV_KV_HOT / MADV_KV_EVICT / MADV_KV_PREFETCH callbacks.
++ * Uses RCU for lockless read access on the hot madvise() call path.
++ *
++ * Copyright (C) 2026 Manish Keshav Lachwani <mlachwani@gmail.com>
++ */
++
++#include <linux/kv_madvise.h>
++#include <linux/rcupdate.h>
++#include <linux/mutex.h>
++#include <linux/export.h>
++#include <linux/errno.h>
++#include <linux/printk.h>
++#include <uapi/asm-generic/mman-common.h>
++
++/*
++ * Serialises register/unregister. Not held on the call path:
++ * dispatch uses RCU read lock for lockless handler lookup.
++ */
++static DEFINE_MUTEX(kv_handler_mutex);
++
++/*
++ * RCU-protected pointer to the registered handler.
++ * NULL means no device has registered; dispatch returns 0 (NOP).
++ */
++static kv_madvise_fn __rcu *kv_handler_p;
++static kv_madvise_fn       kv_handler_actual;
++
++/**
++ * kv_madvise_register_handler - register a KV-cache madvise handler
++ * @fn: callback function (see kv_madvise_fn typedef)
++ *
++ * Called by a device driver during probe. Only one handler is supported
++ * at a time; returns -EBUSY if another is already registered.
++ *
++ * Return: 0 on success, -EBUSY if a handler is already registered.
++ */
++int kv_madvise_register_handler(kv_madvise_fn fn)
++{
++	int ret = 0;
++
++	mutex_lock(&kv_handler_mutex);
++	if (kv_handler_actual) {
++		pr_warn("kv_madvise: handler already registered, rejecting new registration\n");
++		ret = -EBUSY;
++		goto out;
++	}
++	kv_handler_actual = fn;
++	rcu_assign_pointer(kv_handler_p, fn);
++	pr_info("kv_madvise: handler registered (MADV_KV_HOT=%d MADV_KV_EVICT=%d MADV_KV_PREFETCH=%d)\n",
++		MADV_KV_HOT, MADV_KV_EVICT, MADV_KV_PREFETCH);
++out:
++	mutex_unlock(&kv_handler_mutex);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(kv_madvise_register_handler);
++
++/**
++ * kv_madvise_unregister_handler - unregister a KV-cache madvise handler
++ * @fn: the callback function passed to kv_madvise_register_handler()
++ *
++ * Idempotent: safe to call even if @fn is not the currently registered
++ * handler (e.g., after a failed registration).
++ */
++void kv_madvise_unregister_handler(kv_madvise_fn fn)
++{
++	mutex_lock(&kv_handler_mutex);
++	if (kv_handler_actual == fn) {
++		rcu_assign_pointer(kv_handler_p, NULL);
++		synchronize_rcu();
++		kv_handler_actual = NULL;
++		pr_info("kv_madvise: handler unregistered\n");
++	}
++	mutex_unlock(&kv_handler_mutex);
++}
++EXPORT_SYMBOL_GPL(kv_madvise_unregister_handler);
++
++bool kv_madvise_handler_registered(void)
++{
++	return !!rcu_access_pointer(kv_handler_p);
++}
++
++int kv_madvise_dispatch(phys_addr_t pa, size_t len, int behavior, u64 aux)
++{
++	kv_madvise_fn fn;
++	int ret = 0;
++
++	rcu_read_lock();
++	fn = rcu_dereference(kv_handler_p);
++	if (fn)
++		ret = fn(pa, len, behavior, aux);
++	rcu_read_unlock();
++	return ret;
++}
+
+diff --git a/mm/Makefile b/mm/Makefile
+index cccccccccccc..dddddddddddd 100644
+--- a/mm/Makefile
++++ b/mm/Makefile
+@@ -xx,6 +xx,7 @@ obj-$(CONFIG_MEMORY_FAILURE) += memory-failure.o
+ obj-$(CONFIG_HWPOISON_INJECT) += hwpoison-inject.o
+ obj-$(CONFIG_DEBUG_KMEMLEAK) += kmemleak.o
+ obj-$(CONFIG_KASAN)           += kasan/
++obj-$(CONFIG_KV_MADVISE)      += kv_madvise.o
+
+--
+2.43.0
