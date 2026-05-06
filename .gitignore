@@ -12,3 +12,7 @@
 
 # Userspace tools
 tools/kvctl
+
+# Python artifacts
+__pycache__/
+*.pyc
