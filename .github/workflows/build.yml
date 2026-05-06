@@ -12,8 +12,14 @@ jobs:
     steps:
       - name: Point apt at Ubuntu old-releases
         run: |
-          sed -i 's|http://archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
-          sed -i 's|http://security.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          shopt -s nullglob
+          for path in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            sed -i 's|http://archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' "$path"
+            sed -i 's|http://security.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' "$path"
+            sed -i 's|https://archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' "$path"
+            sed -i 's|https://security.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' "$path"
+          done
+          grep -R "^URIs:\\|^deb " /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null || true
 
       - name: Install build dependencies
         run: |
