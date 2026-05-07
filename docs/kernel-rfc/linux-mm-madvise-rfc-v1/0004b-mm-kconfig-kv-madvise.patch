@@ -1,0 +1,50 @@
+From mlachwani@gmail.com Mon May 06 00:00:00 2026
+From: Manish Keshav Lachwani <mlachwani@gmail.com>
+Date: Tue, 06 May 2026 00:04:00 +0530
+Subject: [RFC PATCH 4b/4] mm/Kconfig: add CONFIG_KV_MADVISE option
+Message-ID: <20260506-kv-cpu-madvise-rfc-v1-4b@gmail.com>
+In-Reply-To: <20260506-kv-cpu-madvise-rfc-v1-0@gmail.com>
+References: <20260506-kv-cpu-madvise-rfc-v1-0@gmail.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Add a Kconfig option so the Linux MM side of the KV madvise extension
+can be compiled out entirely on kernels that do not want or need
+device-dispatch behavior for MADV_KV_*.
+
+This keeps the RFC easier to evaluate experimentally while making the
+feature explicitly opt-in, matching reviewer expectations for new
+behavior in mm/.
+
+Signed-off-by: Manish Keshav Lachwani <mlachwani@gmail.com>
+---
+ mm/Kconfig | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/mm/Kconfig b/mm/Kconfig
+index 111111111111..222222222222 100644
+--- a/mm/Kconfig
++++ b/mm/Kconfig
+@@ -1043,6 +1043,19 @@ config USERFAULTFD
+ 	  more details and examples.
+ 
++config KV_MADVISE
++	bool "KV-cache madvise device dispatch hooks"
++	depends on MMU
++	help
++	  Enable experimental MADV_KV_HOT, MADV_KV_EVICT, and
++	  MADV_KV_PREFETCH dispatch hooks in the memory-management
++	  subsystem.
++
++	  These hooks allow userspace runtimes to issue semantic
++	  KV-cache hints through madvise(2), which are translated
++	  into device-specific callbacks by a registered near-memory
++	  compute driver.
++
++	  If unsure, say N.
++
+ endmenu
+ 
+ config HAVE_ARCH_USERFAULTFD_WP
+-- 
+2.43.0
